@@ -1,10 +1,11 @@
+# fpna_agent.py
 import os
 from langchain.agents import initialize_agent, Tool
-from langchain.llms import OpenAI
+from langchain.chat_models import ChatOpenAI
 from google.cloud import bigquery
 from chromadb import Client as ChromaClient
 
-# Load credentials
+# Load GCP credentials via env var
 os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = os.environ.get('GCP_SA_KEY_PATH', '')
 
 # Tool: BigQuery query function
@@ -21,15 +22,16 @@ def retrieve_docs(query: str) -> str:
     snippets = results['documents'][0]
     return "\n\n".join(snippets)
 
-# Agent setup
+# Initialize LLM and Agent
 tools = [
     Tool(name="BigQuery", func=query_bigquery, description="Execute SQL and return CSV string."),
     Tool(name="DocRetrieval", func=retrieve_docs, description="Fetch relevant product-context snippets.")
 ]
 
+llm = ChatOpenAI(temperature=0)
 agent = initialize_agent(
     tools,
-    OpenAI(temperature=0),
+    llm,
     agent="react-with-tool-description",
     verbose=True
 )
