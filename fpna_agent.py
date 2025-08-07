@@ -7,7 +7,6 @@ from google.cloud import bigquery
 # --- Stub for document context retrieval ---
 # Replace with real vector store logic as needed.
 def retrieve_docs(query: str) -> str:
-    # Demo stub: returns placeholder context
     return """
 **Product Context (demo)**
 - Feature A launched on 2024-10-01
@@ -21,25 +20,16 @@ def query_bigquery(sql: str) -> str:
     df = client.query(sql).to_dataframe()
     return df.to_csv(index=False)
 
-# Initialize tools and agent
+# Assemble tools and initialize agent
 tools = [
-    Tool(
-        name="RetrieveDocs",
-        func=retrieve_docs,
-        description="Fetches high-level product context (demo stub)."
-    ),
-    Tool(
-        name="BigQuery",
-        func=query_bigquery,
-        description="Executes SQL against BigQuery and returns CSV data."
-    )
+    Tool(name="RetrieveDocs", func=retrieve_docs, description="Fetches stub product context."),
+    Tool(name="BigQuery", func=query_bigquery, description="Executes BigQuery SQL and returns CSV.")
 ]
 
-# Initialize the chat model (specify a model name) and load API key explicitly
 llm = ChatOpenAI(
     model_name="gpt-3.5-turbo",
     temperature=0,
-    openai_api_key=os.environ.get('OPENAI_API_KEY', None)
+    openai_api_key=os.environ.get('OPENAI_API_KEY')
 )
 agent = initialize_agent(
     tools,
@@ -47,5 +37,3 @@ agent = initialize_agent(
     agent="react-with-tool-description",
     verbose=True
 )
-
-```python
