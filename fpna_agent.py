@@ -16,24 +16,49 @@ def retrieve_docs(query: str) -> str:
 
 # Tool: BigQuery query function
 def query_bigquery(sql: str) -> str:
-    client = bigquery.Client()
-    df = client.query(sql).to_dataframe()
-    return df.to_csv(index=False)
+    try:
+        client = bigquery.Client()
+        df = client.query(sql).to_dataframe()
+        return df.to_csv(index=False)
+    except Exception as e:
+        return f"BigQuery error: {str(e)}"
 
-# Assemble tools and initialize agent
-tools = [
-    Tool(name="RetrieveDocs", func=retrieve_docs, description="Fetches stub product context."),
-    Tool(name="BigQuery", func=query_bigquery, description="Executes BigQuery SQL and returns CSV.")
-]
-
-llm = ChatOpenAI(
-    model_name="gpt-3.5-turbo",
-    temperature=0,
-    openai_api_key=os.environ.get('OPENAI_API_KEY')
-)
-agent = initialize_agent(
-    tools,
-    llm,
-    agent="react-with-tool-description",
-    verbose=True
-)
+def create_agent():
+    """Create the agent with current environment credentials"""
+    
+    # Check if API key is available
+    api_key = os.environ.get('OPENAI_API_KEY')
+    if not api_key:
+        raise ValueError("OpenAI API key not found in environment variables")
+    
+    # Assemble tools
+    tools = [
+        Tool(
+            name="RetrieveDocs", 
+            func=retrieve_docs, 
+            description="Fetches stub product context."
+        ),
+        Tool(
+            name="BigQuery", 
+            func=query_bigquery, 
+            description="Executes BigQuery SQL and returns CSV."
+        )
+    ]
+    
+    # Initialize LLM with current API key
+    llm = ChatOpenAI(
+        model_name="gpt-3.5-turbo",
+        temperature=0,
+        openai_api_key=api_key
+    )
+    
+    # Create and return agent
+    agent = initialize_agent(
+        tools,
+        llm,
+        agent="zero-shot-react-description",  # Updated agent type
+        verbose=True,
+        handle_parsing_errors=True  # Handle potential parsing errors
+    )
+    
+    return agent
