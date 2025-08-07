@@ -1,0 +1,6 @@
+streamlit
+openai
+langchain
+google-cloud-bigquery
+chromadb
+pandas
