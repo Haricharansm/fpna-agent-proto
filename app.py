@@ -5,32 +5,43 @@ from fpna_agent import agent
 
 st.title("FP&A AI-Agent Prototype")
 
-# -- Credentials Setup --
+# Credentials input
 st.sidebar.header("Credentials")
-openai_key = st.sidebar.text_input("OpenAI API Key", type="password")
-gcp_key_json = st.sidebar.text_area("GCP Service Account JSON", height=200)
+openai_key = st.sidebar.text_input(
+    "OpenAI API Key", type="password"
+)
+gcp_key_json = st.sidebar.text_area(
+    "GCP Service Account JSON", height=200
+)
 
+# Apply credentials
+i
 if openai_key:
     os.environ['OPENAI_API_KEY'] = openai_key
 if gcp_key_json:
-    # Write the GCP JSON to a temp file and set GOOGLE_APPLICATION_CREDENTIALS
-    with open("/tmp/gcp_key.json", "w") as f:
+    path = "/tmp/gcp_key.json"
+    with open(path, "w") as f:
         f.write(gcp_key_json)
-    os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = "/tmp/gcp_key.json"
+    os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = path
 
-st.sidebar.header("Demo Data Setup")
-use_demo = st.sidebar.checkbox("Use demo BigQuery dataset?", value=True)
+# Demo dataset toggle
+use_demo = st.sidebar.checkbox(
+    "Use demo BigQuery dataset?", value=True
+)
 
-question = st.text_input("Ask about the weekly funnel…")
+# User question
+description = st.text_input(
+    "Ask about the weekly funnel…"
+)
 if st.button("Run"):
     if not openai_key:
-        st.error("Please enter your OpenAI API Key in the sidebar.")
+        st.error("Enter your OpenAI API key.")
     elif not gcp_key_json and not use_demo:
-        st.error("Please enter your GCP Service Account JSON or toggle demo dataset.")
+        st.error("Enter GCP JSON or enable demo.")
     else:
         with st.spinner("Analyzing…"):
-            prompt = question
+            prompt = description
             if use_demo:
-                prompt = "[DEMO DATA] " + question
-            response = agent.run(prompt)
-            st.markdown(response)
+                prompt = "[DEMO DATA] " + description
+            result = agent.run(prompt)
+            st.markdown(result)
