@@ -35,11 +35,17 @@ tools = [
     )
 ]
 
-# Initialize the chat model (specify a model name)
-llm = ChatOpenAI(model_name="gpt-3.5-turbo", temperature=0)
+# Initialize the chat model (specify a model name) and load API key explicitly
+llm = ChatOpenAI(
+    model_name="gpt-3.5-turbo",
+    temperature=0,
+    openai_api_key=os.environ.get('OPENAI_API_KEY', None)
+)
 agent = initialize_agent(
     tools,
     llm,
     agent="react-with-tool-description",
     verbose=True
 )
+
+```python
