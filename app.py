@@ -4,7 +4,7 @@ import streamlit as st
 from fpna_agent import create_agent
 
 # Set your OpenAI API key here
-OPENAI_API_KEY = "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"  # Replace with your actual key
+OPENAI_API_KEY = "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"  # Replace with your actual key
 os.environ['OPENAI_API_KEY'] = OPENAI_API_KEY
 
 st.set_page_config(
