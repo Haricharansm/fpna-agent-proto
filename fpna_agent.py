@@ -35,7 +35,8 @@ tools = [
     )
 ]
 
-llm = ChatOpenAI(temperature=0)
+# Initialize the chat model (specify a model name)
+llm = ChatOpenAI(model_name="gpt-3.5-turbo", temperature=0)
 agent = initialize_agent(
     tools,
     llm,
