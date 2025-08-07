@@ -1,6 +1,8 @@
+# requirements.txt
 streamlit
 openai
 langchain
+langchain-community
 google-cloud-bigquery
 chromadb
 pandas
