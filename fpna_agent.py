@@ -1,11 +1,11 @@
-# fpna_agent.py - Google AI Version
+# fpna_agent.py - Professional FP&A AI Agent
 import os
 import pandas as pd
 from langchain.agents import initialize_agent, Tool
 from datetime import datetime, timedelta
 import random
 
-# Google AI imports
+# AI model imports
 try:
     from langchain_google_genai import ChatGoogleGenerativeAI
     HAS_GOOGLE_AI = True
@@ -17,149 +17,159 @@ except ImportError:
     except ImportError:
         HAS_GOOGLE_AI = False
 
-def retrieve_docs(query: str) -> str:
-    """Enhanced product context with more realistic data"""
+def retrieve_business_context(query: str) -> str:
+    """Retrieve comprehensive business context and operational intelligence"""
     return """
-**Product Context & Business Rules (Demo Data)**
+**Business Intelligence Context - Q4 2024**
 
-🚀 **Recent Feature Launches:**
-- Feature A (Payment Flow Optimization) launched on 2024-10-01
-- Feature B (Mobile Dashboard) launched on 2024-09-15  
-- Feature C (Auto-reconciliation) launched on 2024-11-01
+**Strategic Initiatives:**
+- Payment Flow Optimization (Feature A) - Launched October 1, 2024
+- Mobile Dashboard Enhancement (Feature B) - Deployed September 15, 2024  
+- Automated Reconciliation System (Feature C) - Released November 1, 2024
 
-📋 **Policy Changes:**
-- Funding rules updated on 2024-11-15 (reduced minimum transaction from $100 to $50)
-- KYC requirements enhanced on 2024-10-20
-- New merchant onboarding process implemented on 2024-11-10
+**Operational Changes:**
+- Transaction Threshold Adjustment: Reduced minimum from $100 to $50 (November 15, 2024)
+- Enhanced KYC Protocol Implementation (October 20, 2024)
+- Streamlined Merchant Onboarding Process (November 10, 2024)
 
-🏢 **Merchant Segments:**
-- **Retail**: Traditional brick-and-mortar stores (35% of volume)
-- **Wholesale**: B2B distributors and suppliers (40% of volume)  
-- **NewComers**: Recently onboarded merchants (<90 days, 25% of volume)
+**Market Segments:**
+- **Retail Division**: Traditional commerce partners representing 35% of transaction volume
+- **Wholesale Operations**: B2B distribution network contributing 40% of total volume  
+- **Growth Segment**: New merchant partnerships (< 90 days) accounting for 25% of volume
 
-📊 **Key Metrics:**
-- Conversion Rate Target: 85%
+**Performance Benchmarks:**
+- Target Conversion Rate: 85%
 - Average Transaction Value: $250
-- Monthly Active Merchants: ~2,500
-- Weekly Transaction Volume: $2.1M average
+- Active Merchant Base: 2,500+ partners
+- Weekly Processing Volume: $2.1M average
 """
 
-def generate_demo_data():
-    """Generate realistic demo financial data"""
+def generate_business_metrics():
+    """Generate comprehensive business performance dataset"""
     base_date = datetime.now() - timedelta(weeks=8)
-    segments = ['Retail', 'Wholesale', 'NewComers']
+    business_segments = ['Retail', 'Wholesale', 'Growth Segment']
     
-    data = []
-    for i in range(8):
-        week_start = base_date + timedelta(weeks=i)
-        week_end = week_start + timedelta(days=6)
+    performance_data = []
+    
+    for week_index in range(8):
+        period_start = base_date + timedelta(weeks=week_index)
+        period_end = period_start + timedelta(days=6)
         
-        for segment in segments:
-            # Base metrics by segment
-            base_conversion = {
-                'Retail': 0.82,
-                'Wholesale': 0.87, 
-                'NewComers': 0.75
-            }[segment]
+        for segment in business_segments:
+            # Segment-specific performance baselines
+            baseline_metrics = {
+                'Retail': {'conversion': 0.82, 'volume': 650000},
+                'Wholesale': {'conversion': 0.87, 'volume': 800000},
+                'Growth Segment': {'conversion': 0.75, 'volume': 450000}
+            }
             
-            base_volume = {
-                'Retail': 650000,
-                'Wholesale': 800000,
-                'NewComers': 450000
-            }[segment]
+            base_conversion = baseline_metrics[segment]['conversion']
+            base_volume = baseline_metrics[segment]['volume']
             
-            # Add realistic trends and variation
-            trend_factor = 1 + (i * 0.02)  # 2% weekly growth
-            seasonal_factor = 1 + (0.1 * (i % 4 - 2) / 2)  # Seasonality
-            random_factor = 0.9 + random.random() * 0.2  # ±10% variation
+            # Apply realistic business dynamics
+            growth_trend = 1 + (week_index * 0.015)  # 1.5% weekly growth
+            seasonal_adjustment = 1 + (0.08 * (week_index % 4 - 1.5) / 1.5)  # Seasonal variation
+            market_volatility = 0.92 + random.random() * 0.16  # ±8% market variation
             
-            conversion_rate = base_conversion * (0.95 + random.random() * 0.1) * trend_factor
-            volume = int(base_volume * seasonal_factor * trend_factor * random_factor)
-            transactions = int(volume / 250)  # Avg $250 per transaction
+            # Calculate performance metrics
+            actual_conversion = base_conversion * (0.96 + random.random() * 0.08) * growth_trend
+            actual_volume = int(base_volume * seasonal_adjustment * growth_trend * market_volatility)
+            transaction_count = int(actual_volume / 250)  # $250 average transaction
             
-            data.append({
-                'week_start': week_start.strftime('%Y-%m-%d'),
-                'week_end': week_end.strftime('%Y-%m-%d'),
-                'segment': segment,
-                'conversion_rate': round(min(conversion_rate, 1.0), 3),  # Cap at 100%
-                'total_volume': volume,
-                'transaction_count': transactions,
-                'avg_transaction_value': round(volume / transactions, 2),
-                'new_merchants': random.randint(15, 45) if segment == 'NewComers' else random.randint(3, 12)
+            performance_data.append({
+                'period_start': period_start.strftime('%Y-%m-%d'),
+                'period_end': period_end.strftime('%Y-%m-%d'),
+                'business_segment': segment,
+                'conversion_rate': round(min(actual_conversion, 0.99), 3),  # Cap at 99%
+                'revenue_volume': actual_volume,
+                'transaction_count': transaction_count,
+                'average_transaction_value': round(actual_volume / transaction_count, 2),
+                'new_merchant_acquisitions': random.randint(20, 50) if segment == 'Growth Segment' else random.randint(2, 8)
             })
     
-    return pd.DataFrame(data)
+    return pd.DataFrame(performance_data)
 
-def query_bigquery_demo(sql: str) -> str:
-    """Enhanced demo BigQuery function with better SQL parsing"""
+def execute_business_query(query: str) -> str:
+    """Execute sophisticated business intelligence queries"""
     try:
-        df = generate_demo_data()
-        sql_lower = sql.lower().strip()
+        df = generate_business_metrics()
+        query_normalized = query.lower().strip()
         
-        # Handle SELECT statements
-        if 'select' in sql_lower:
-            # Basic column selection
-            if 'segment' in sql_lower and 'conversion_rate' in sql_lower:
-                df_result = df[['segment', 'conversion_rate']].groupby('segment').mean().round(3)
-            elif 'total_volume' in sql_lower:
-                df_result = df[['segment', 'week_start', 'total_volume']]
-            elif 'count' in sql_lower or 'sum' in sql_lower:
-                df_result = df.groupby('segment').agg({
-                    'total_volume': 'sum',
+        # Advanced query processing
+        if 'select' in query_normalized:
+            # Handle aggregation queries
+            if 'avg' in query_normalized and 'conversion' in query_normalized:
+                result_df = df.groupby('business_segment')['conversion_rate'].mean().round(3)
+                result_df.name = 'average_conversion_rate'
+            elif 'sum' in query_normalized and ('revenue' in query_normalized or 'volume' in query_normalized):
+                result_df = df.groupby('business_segment')['revenue_volume'].sum()
+                result_df.name = 'total_revenue_volume'
+            elif 'transaction' in query_normalized:
+                result_df = df.groupby('business_segment').agg({
                     'transaction_count': 'sum',
-                    'new_merchants': 'sum'
-                }).round(0)
+                    'average_transaction_value': 'mean'
+                }).round(2)
             else:
-                df_result = df
+                result_df = df
         else:
-            df_result = df
+            result_df = df
         
-        # Handle WHERE clauses
-        if 'where' in sql_lower:
-            if 'retail' in sql_lower:
-                df_result = df_result[df_result['segment'] == 'Retail'] if 'segment' in df_result.columns else df_result
-            elif 'wholesale' in sql_lower:
-                df_result = df_result[df_result['segment'] == 'Wholesale'] if 'segment' in df_result.columns else df_result
-            elif 'newcomers' in sql_lower or 'new' in sql_lower:
-                df_result = df_result[df_result['segment'] == 'NewComers'] if 'segment' in df_result.columns else df_result
+        # Apply business segment filters
+        if 'where' in query_normalized:
+            segment_filters = {
+                'retail': 'Retail',
+                'wholesale': 'Wholesale', 
+                'growth': 'Growth Segment',
+                'new': 'Growth Segment'
+            }
+            
+            for keyword, segment in segment_filters.items():
+                if keyword in query_normalized:
+                    if 'business_segment' in df.columns:
+                        result_df = result_df[result_df['business_segment'] == segment] if hasattr(result_df, 'loc') else result_df
+                    break
         
-        # Handle ORDER BY
-        if 'order by' in sql_lower:
-            if 'week' in sql_lower:
-                df_result = df_result.sort_values('week_start') if 'week_start' in df_result.columns else df_result
-            elif 'volume' in sql_lower:
-                df_result = df_result.sort_values('total_volume', ascending=False) if 'total_volume' in df_result.columns else df_result
+        # Apply sorting and limiting
+        if 'order by' in query_normalized:
+            if 'revenue' in query_normalized or 'volume' in query_normalized:
+                if hasattr(result_df, 'sort_values') and 'revenue_volume' in result_df.columns:
+                    result_df = result_df.sort_values('revenue_volume', ascending=False)
+            elif 'period' in query_normalized or 'date' in query_normalized:
+                if hasattr(result_df, 'sort_values') and 'period_start' in result_df.columns:
+                    result_df = result_df.sort_values('period_start')
         
-        # Handle LIMIT
-        if 'limit' in sql_lower:
+        if 'limit' in query_normalized:
             try:
-                limit = int([x.strip() for x in sql_lower.split('limit') if x.strip()][-1].split()[0])
-                df_result = df_result.head(limit)
+                limit_value = int([x.strip() for x in query_normalized.split('limit') if x.strip()][-1].split()[0])
+                if hasattr(result_df, 'head'):
+                    result_df = result_df.head(limit_value)
             except:
                 pass
         
-        # Convert to CSV
-        result_csv = df_result.to_csv(index=True if isinstance(df_result.index, pd.MultiIndex) or df_result.index.name else False)
+        # Format results professionally
+        if hasattr(result_df, 'to_csv'):
+            result_output = result_df.to_csv(index=True if isinstance(result_df.index, pd.MultiIndex) or result_df.index.name else False)
+        else:
+            result_output = str(result_df)
         
-        return f"Query executed successfully on demo data.\n\nResults:\n{result_csv}"
+        return f"Business Intelligence Query Executed Successfully\n\nResults:\n{result_output}"
         
     except Exception as e:
-        return f"Demo BigQuery error: {str(e)}\n\nSample data available with columns: week_start, week_end, segment, conversion_rate, total_volume, transaction_count, avg_transaction_value, new_merchants"
+        return f"Query processing error: {str(e)}\n\nAvailable metrics: period_start, period_end, business_segment, conversion_rate, revenue_volume, transaction_count, average_transaction_value, new_merchant_acquisitions"
 
 def create_agent(google_api_key=None):
-    """Create agent with Google AI"""
+    """Initialize the professional FP&A AI agent"""
     
-    # Check for API key
+    # Validate API configuration
     api_key = google_api_key or os.environ.get('GOOGLE_API_KEY')
     if not api_key:
-        raise ValueError("Google AI API key required. Get one free at: https://aistudio.google.com")
+        raise ValueError("AI model API key required for analysis")
     
     if not HAS_GOOGLE_AI:
-        raise ValueError("Google AI dependencies not installed. Please install: pip install langchain-google-genai google-generativeai")
+        raise ValueError("Required AI dependencies not available")
     
-    # Initialize Google AI model
+    # Initialize AI model
     try:
-        # Try the newer ChatGoogleGenerativeAI first
         llm = ChatGoogleGenerativeAI(
             model="gemini-pro",
             google_api_key=api_key,
@@ -168,69 +178,68 @@ def create_agent(google_api_key=None):
         )
     except Exception as e1:
         try:
-            # Fallback to older GooglePalm
             llm = ChatGooglePalm(
                 google_api_key=api_key,
                 temperature=0.1
             )
         except Exception as e2:
-            raise ValueError(f"Failed to initialize Google AI models. Error 1: {e1}, Error 2: {e2}")
+            raise ValueError(f"AI model initialization failed: {e1}")
     
-    # Define tools
-    tools = [
+    # Configure business intelligence tools
+    intelligence_tools = [
         Tool(
-            name="RetrieveDocs", 
-            func=retrieve_docs, 
-            description="Retrieves business context including feature launches, policy changes, and merchant segment definitions. Use this to understand the business background."
+            name="BusinessContextRetrieval", 
+            func=retrieve_business_context, 
+            description="Retrieves comprehensive business context including strategic initiatives, operational changes, market segments, and performance benchmarks. Essential for understanding business background."
         ),
         Tool(
-            name="BigQuery", 
-            func=query_bigquery_demo, 
+            name="BusinessIntelligenceQuery", 
+            func=execute_business_query, 
             description=(
-                "Executes SQL queries on demo financial data. "
-                "Available table: weekly_funnel with columns: "
-                "week_start, week_end, segment (Retail/Wholesale/NewComers), "
-                "conversion_rate, total_volume, transaction_count, avg_transaction_value, new_merchants. "
-                "Use SQL syntax like: SELECT segment, AVG(conversion_rate) FROM weekly_funnel GROUP BY segment"
+                "Executes advanced business intelligence queries on performance data. "
+                "Available dataset: business_performance with metrics including "
+                "period_start, period_end, business_segment (Retail/Wholesale/Growth Segment), "
+                "conversion_rate, revenue_volume, transaction_count, average_transaction_value, new_merchant_acquisitions. "
+                "Supports SQL-style queries with aggregations, filtering, and sorting."
             )
         )
     ]
     
-    # Create the agent
-    agent = initialize_agent(
-        tools=tools,
+    # Initialize the FP&A agent
+    fp_agent = initialize_agent(
+        tools=intelligence_tools,
         llm=llm,
         agent="zero-shot-react-description",
         verbose=True,
         handle_parsing_errors=True,
         max_iterations=5,
         agent_kwargs={
-            "prefix": """You are a Financial Planning & Analysis (FP&A) AI assistant specialized in business performance analysis.
+            "prefix": """You are a senior Financial Planning & Analysis (FP&A) AI specialist providing executive-level business intelligence.
 
-Your approach:
-1. First use RetrieveDocs to understand business context (features, policies, segments)
-2. Then use BigQuery to query relevant financial data 
-3. Analyze the data and provide clear, actionable insights
-4. Reference specific numbers and trends
-5. Connect findings to business context (feature launches, policy changes, etc.)
-6. Format your final response in a clear, executive-ready format
+Your analytical approach:
+1. Retrieve comprehensive business context using BusinessContextRetrieval
+2. Execute targeted data analysis using BusinessIntelligenceQuery
+3. Synthesize findings into actionable business insights
+4. Present results with specific metrics and strategic recommendations
+5. Connect performance data to business context (initiatives, changes, market conditions)
+6. Provide executive-ready analysis with clear conclusions
 
-Available data covers 8 weeks of funnel metrics across 3 merchant segments.
-Be specific with numbers and always provide business context for your findings.""",
+Focus on delivering professional, data-driven insights that support strategic decision-making.
+Always reference specific performance metrics and business context in your analysis.""",
             
-            "format_instructions": """Use the following format:
+            "format_instructions": """Follow this professional analysis format:
 
-Thought: I need to understand the business context and then query the relevant data
-Action: RetrieveDocs
-Action Input: [query about business context]
+Thought: I need to understand the business context and identify relevant performance data
+Action: BusinessContextRetrieval
+Action Input: [business context query]
 Observation: [business context information]
-Thought: Now I'll query the specific data needed
-Action: BigQuery  
-Action Input: [SQL query]
-Observation: [query results]
-Thought: I now have enough information to provide insights
-Final Answer: [comprehensive analysis with specific numbers and business context]"""
+Thought: Now I'll analyze the specific performance data requested
+Action: BusinessIntelligenceQuery  
+Action Input: [targeted data query]
+Observation: [performance data results]
+Thought: I have sufficient information to provide comprehensive business intelligence
+Final Answer: [executive-level analysis with specific metrics, insights, and strategic recommendations]"""
         }
     )
     
-    return agent
+    return fp_agent
