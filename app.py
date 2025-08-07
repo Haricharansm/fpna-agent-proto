@@ -15,7 +15,6 @@ gcp_key_json = st.sidebar.text_area(
 )
 
 # Apply credentials
-i
 if openai_key:
     os.environ['OPENAI_API_KEY'] = openai_key
 if gcp_key_json:
