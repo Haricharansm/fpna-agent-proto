@@ -1,118 +1,187 @@
-# app.py (Streamlit UI)
+# app.py - Google AI Streamlit App
 import os
 import streamlit as st
 from fpna_agent import create_agent
 
-# Set your OpenAI API key here
-OPENAI_API_KEY = "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"  # Replace with your actual key
-os.environ['OPENAI_API_KEY'] = OPENAI_API_KEY
-
 st.set_page_config(
-    page_title="FP&A AI Agent", 
+    page_title="FP&A AI Agent - Google AI", 
     page_icon="📊",
     layout="wide"
 )
 
+# Header
 st.title("📊 FP&A AI-Agent Prototype")
-st.markdown("Ask questions about your financial data and get AI-powered insights!")
+st.markdown("**Powered by Google AI (Gemini) - Free API!** 🆓")
 
-# Optional GCP credentials (only needed if not using demo)
+# Sidebar for API key
 with st.sidebar:
-    st.header("⚙️ Configuration")
+    st.header("🔑 Google AI Setup")
     
-    # Demo dataset toggle
-    use_demo = st.checkbox(
-        "Use demo BigQuery dataset?", 
-        value=True,
-        help="Enable this to use sample data without needing GCP credentials"
+    # Instructions
+    with st.expander("📋 How to get your FREE Google AI key"):
+        st.markdown("""
+        1. **Go to**: [aistudio.google.com](https://aistudio.google.com)
+        2. **Sign in** with your Google account
+        3. **Click "Get API key"** (top right)
+        4. **Create API key** → "Create API key in new project"
+        5. **Copy the key** (starts with `AIza...`)
+        6. **Paste it below** 👇
+        
+        ✅ **Completely FREE** - No billing required!
+        """)
+    
+    # API Key input
+    google_api_key = st.text_input(
+        "Google AI API Key",
+        type="password",
+        placeholder="AIza...",
+        help="Get your free API key from aistudio.google.com"
     )
     
-    if not use_demo:
-        st.subheader("GCP Credentials")
-        gcp_key_json = st.text_area(
-            "GCP Service Account JSON", 
-            height=200,
-            help="Paste your GCP service account JSON here"
-        )
-        
-        if gcp_key_json:
-            path = "/tmp/gcp_key.json"
-            try:
-                with open(path, "w") as f:
-                    f.write(gcp_key_json)
-                os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = path
-                st.success("✅ GCP credentials loaded")
-            except Exception as e:
-                st.error(f"Error saving GCP credentials: {e}")
+    # Status indicator
+    if google_api_key:
+        if google_api_key.startswith('AIza'):
+            st.success("✅ API Key looks valid!")
+        else:
+            st.warning("⚠️ API key should start with 'AIza'")
     else:
-        st.info("🔧 Using demo data - no GCP setup required")
+        st.info("👆 Enter your Google AI API key to get started")
+    
+    st.divider()
+    
+    # Configuration
+    st.header("⚙️ Configuration")
+    use_demo = st.checkbox("Use demo data", value=True, disabled=True, help="Demo mode with realistic financial data")
+    
+    st.info("🎯 Using demo financial data with 8 weeks of metrics across Retail, Wholesale, and NewComers segments")
 
 # Main interface
-col1, col2 = st.columns([3, 1])
+col1, col2 = st.columns([4, 1])
 
 with col1:
-    description = st.text_input(
-        "Ask about the weekly funnel…",
+    user_question = st.text_input(
+        "Ask about your financial performance:",
         placeholder="e.g., Show me conversion rates by merchant segment this week",
-        help="Enter your question about financial performance and analytics"
+        help="Ask questions about funnel metrics, trends, segments, or business performance"
     )
 
 with col2:
-    st.write("")  # Add some spacing
-    run_button = st.button("🚀 Run Analysis", use_container_width=True)
+    st.write("")  # Spacing
+    run_button = st.button("🚀 Analyze", use_container_width=True, type="primary")
 
 # Example questions
-with st.expander("💡 Example Questions"):
-    st.markdown("""
-    - Show me conversion rates by merchant segment this week
-    - What's the trend in weekly funnel performance?
-    - Compare revenue between Retail and Wholesale segments
-    - How did Feature A launch impact our metrics?
-    - Show me the funding rule changes impact
-    """)
+with st.expander("💡 Try these example questions"):
+    examples = [
+        "Show me conversion rates by merchant segment",
+        "What's the weekly revenue trend across all segments?", 
+        "Compare transaction volumes between Retail and Wholesale",
+        "How did the Feature A launch on Oct 1st impact our metrics?",
+        "What's the impact of the funding rule changes in November?",
+        "Show me new merchant acquisition by segment",
+        "Which segment has the highest average transaction value?",
+        "What's our overall business performance trend?"
+    ]
+    
+    for i, example in enumerate(examples):
+        col_ex1, col_ex2 = st.columns([6, 1])
+        with col_ex1:
+            st.write(f"• {example}")
+        with col_ex2:
+            if st.button("📋", key=f"copy_{i}", help="Use this question"):
+                st.rerun()
 
+# Main analysis section
 if run_button:
-    if not description.strip():
+    if not user_question.strip():
         st.warning("⚠️ Please enter a question to analyze.")
-    elif not use_demo and not os.environ.get('GOOGLE_APPLICATION_CREDENTIALS'):
-        st.error("🔑 Please provide GCP credentials or enable demo mode.")
+    elif not google_api_key:
+        st.error("🔑 Please enter your Google AI API key in the sidebar.")
+        st.info("👈 Get your free API key from: https://aistudio.google.com")
     else:
-        with st.spinner("🤖 AI Agent is analyzing your request..."):
+        # Run analysis
+        with st.spinner("🤖 Google AI is analyzing your request... (This may take 10-30 seconds)"):
             try:
-                # Create agent with credentials available
-                agent = create_agent(use_demo=use_demo)
+                # Create agent with API key
+                agent = create_agent(google_api_key=google_api_key)
                 
-                prompt = description
-                if use_demo:
-                    prompt = "[DEMO DATA] " + description
+                # Add demo data context to the prompt
+                enhanced_prompt = f"[DEMO DATA ANALYSIS] {user_question}"
                 
                 # Run the agent
-                result = agent.run(prompt)
+                result = agent.run(enhanced_prompt)
                 
                 # Display results
                 st.success("✅ Analysis Complete!")
-                st.markdown("### 📈 Results:")
+                
+                # Results section
+                st.markdown("---")
+                st.markdown("## 📈 Analysis Results")
                 st.markdown(result)
+                
+                # Add a note about the data
+                with st.expander("ℹ️ About this analysis"):
+                    st.info("""
+                    This analysis is based on demo data containing:
+                    - 8 weeks of financial performance metrics
+                    - 3 merchant segments: Retail, Wholesale, NewComers  
+                    - Realistic business context including feature launches and policy changes
+                    - Metrics: conversion rates, transaction volumes, merchant counts
+                    """)
                 
             except Exception as e:
                 st.error("❌ An error occurred during analysis:")
-                st.error(str(e))
+                error_msg = str(e)
                 
-                # Debug info in expander
+                # User-friendly error messages
+                if "API key" in error_msg:
+                    st.error("🔑 Invalid or missing API key")
+                    st.info("Please check your Google AI API key. Get a free one at: https://aistudio.google.com")
+                elif "dependencies not installed" in error_msg:
+                    st.error("📦 Missing required packages")
+                    st.code("pip install langchain-google-genai google-generativeai")
+                elif "quota" in error_msg.lower():
+                    st.error("📊 API quota exceeded")
+                    st.info("Google AI has generous free limits. Try again in a few minutes.")
+                else:
+                    st.error(f"Unexpected error: {error_msg}")
+                
+                # Debug section
                 with st.expander("🔍 Debug Information"):
-                    st.code(str(e))
-                    st.write("**Environment Check:**")
-                    st.write(f"- OpenAI API Key: {'✅ Set' if os.environ.get('OPENAI_API_KEY') else '❌ Missing'}")
-                    st.write(f"- GCP Credentials: {'✅ Set' if os.environ.get('GOOGLE_APPLICATION_CREDENTIALS') else '❌ Missing'}")
-                    st.write(f"- Demo Mode: {'✅ Enabled' if use_demo else '❌ Disabled'}")
+                    st.code(error_msg)
+                    st.markdown("**Troubleshooting:**")
+                    st.markdown("1. Verify your API key starts with 'AIza'")
+                    st.markdown("2. Ensure you have internet connection")
+                    st.markdown("3. Try a simpler question")
+                    st.markdown("4. Check if you've exceeded Google AI free limits")
 
-# Footer
+# Footer with helpful info
 st.markdown("---")
-st.markdown(
-    """
-    <div style='text-align: center; color: #666;'>
-        🤖 Powered by OpenAI & LangChain | 📊 FP&A Analytics Agent
-    </div>
-    """, 
-    unsafe_allow_html=True
-)
+col_f1, col_f2, col_f3 = st.columns(3)
+
+with col_f1:
+    st.markdown("**🤖 Powered by:**")
+    st.markdown("Google AI (Gemini)")
+    
+with col_f2:
+    st.markdown("**💰 Cost:**")
+    st.markdown("Free (No billing required)")
+
+with col_f3:
+    st.markdown("**📊 Data:**")
+    st.markdown("Demo financial metrics")
+
+# Performance tips
+with st.expander("⚡ Performance Tips"):
+    st.markdown("""
+    **For best results:**
+    - Be specific in your questions
+    - Ask about trends, comparisons, or specific metrics
+    - Reference segments (Retail, Wholesale, NewComers)
+    - Ask about time periods or business events
+    
+    **Google AI Features:**
+    - ✅ Free with generous limits
+    - ✅ Fast response times
+    - ✅ Good at data analysis
+    - ✅ No billing setup required
+    """)
