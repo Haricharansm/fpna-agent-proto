@@ -1,8 +1,8 @@
 # requirements.txt
-streamlit
-openai
-langchain
-langchain-community
-google-cloud-bigquery
+streamlit>=1.28.0
+langchain>=0.0.350
+openai>=1.0.0
+pandas>=1.5.0
+google-cloud-bigquery>=3.11.0
 chromadb
-pandas
+
