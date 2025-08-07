@@ -5,20 +5,15 @@ from langchain.chat_models import ChatOpenAI
 from google.cloud import bigquery
 
 # --- Stub for document context retrieval ---
-# For a full implementation, replace this with a vector store (FAISS, Pinecone, etc.)
-# and load your product documentation.
+# Replace with real vector store logic as needed.
 def retrieve_docs(query: str) -> str:
     # Demo stub: returns placeholder context
-    return (
-        "**Product Context (demo)**
-"
-        "- Feature A launched on 2024-10-01
-"
-        "- Changed funding rules on 2024-11-15
-"
-        "- Merchant segment definitions: Retail, Wholesale, NewComers
-"
-    )
+    return """
+**Product Context (demo)**
+- Feature A launched on 2024-10-01
+- Changed funding rules on 2024-11-15
+- Merchant segment definitions: Retail, Wholesale, NewComers
+"""
 
 # Tool: BigQuery query function
 def query_bigquery(sql: str) -> str:
@@ -39,6 +34,7 @@ tools = [
         description="Executes SQL against BigQuery and returns CSV data."
     )
 ]
+
 llm = ChatOpenAI(temperature=0)
 agent = initialize_agent(
     tools,
