@@ -4,7 +4,7 @@ import streamlit as st
 from fpna_agent import agent
 
 # Load keys
-ot.environ['OPENAI_API_KEY'] = os.environ.get('OPENAI_API_KEY', '')
+os.environ['OPENAI_API_KEY'] = os.environ.get('OPENAI_API_KEY', '')
 
 st.title("FP&A AI-Agent Prototype")
 
