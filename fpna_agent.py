@@ -3,10 +3,22 @@ import os
 from langchain.agents import initialize_agent, Tool
 from langchain.chat_models import ChatOpenAI
 from google.cloud import bigquery
-from chromadb import Client as ChromaClient
 
-# Load GCP credentials via env var
-os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = os.environ.get('GCP_SA_KEY_PATH', '')
+# --- Stub for document context retrieval ---
+# For a full implementation, replace this with a vector store (FAISS, Pinecone, etc.)
+# and load your product documentation.
+def retrieve_docs(query: str) -> str:
+    # Demo stub: returns placeholder context
+    return (
+        "**Product Context (demo)**
+"
+        "- Feature A launched on 2024-10-01
+"
+        "- Changed funding rules on 2024-11-15
+"
+        "- Merchant segment definitions: Retail, Wholesale, NewComers
+"
+    )
 
 # Tool: BigQuery query function
 def query_bigquery(sql: str) -> str:
@@ -14,20 +26,19 @@ def query_bigquery(sql: str) -> str:
     df = client.query(sql).to_dataframe()
     return df.to_csv(index=False)
 
-# Tool: Document retrieval from Chroma vector store
-def retrieve_docs(query: str) -> str:
-    chroma = ChromaClient()
-    collection = chroma.get_collection("product_docs")
-    results = collection.query(query_texts=[query], n_results=3)
-    snippets = results['documents'][0]
-    return "\n\n".join(snippets)
-
-# Initialize LLM and Agent
+# Initialize tools and agent
 tools = [
-    Tool(name="BigQuery", func=query_bigquery, description="Execute SQL and return CSV string."),
-    Tool(name="DocRetrieval", func=retrieve_docs, description="Fetch relevant product-context snippets.")
+    Tool(
+        name="RetrieveDocs",
+        func=retrieve_docs,
+        description="Fetches high-level product context (demo stub)."
+    ),
+    Tool(
+        name="BigQuery",
+        func=query_bigquery,
+        description="Executes SQL against BigQuery and returns CSV data."
+    )
 ]
-
 llm = ChatOpenAI(temperature=0)
 agent = initialize_agent(
     tools,
