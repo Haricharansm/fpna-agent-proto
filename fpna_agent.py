@@ -1,6 +1,6 @@
 # fpna.py — deterministic FP&A core (no LangChain agent)
 # - CSVs in ./data → DuckDB
-# - Deterministic helpers + optional direct Gemini 1.5 fallback (no ReAct, no parser errors)
+# - Smarter deterministic helpers + optional direct Gemini 1.5 fallback (no ReAct, no parser errors)
 
 from __future__ import annotations
 
@@ -29,6 +29,47 @@ except Exception:
     GENAI_OK = False
 
 DATA_DIR = os.environ.get("DATA_DIR", "data")
+
+# ------------------------------ Column mapping & priorities ------------------------------
+
+PREFERRED_TABLE_ORDER = [
+    "monthly_summary",
+    "transaction_data",
+    "segment_analysis",
+    "daily_summary",
+    "channel_performance",
+]
+
+TIME_ALIASES    = ["week_start", "date", "day", "month", "period"]
+SEGMENT_ALIASES = ["merchant_segment", "segment", "customer_segment"]
+VISITS_ALIASES  = ["total_visits", "sessions", "visits", "impressions"]
+LEADS_ALIASES   = ["leads", "conversions", "converted", "signups"]
+
+def _priority_rank(name: str) -> int:
+    try:
+        return PREFERRED_TABLE_ORDER.index(name)
+    except Exception:
+        return 99
+
+def _pick_conversion_source(tables: Dict[str, pd.DataFrame]):
+    """
+    Pick the table that actually has time + segment + visits + leads.
+    Tie-breaks using PREFERRED_TABLE_ORDER.
+    Returns: (table_name, mapping_dict, score)
+    """
+    best_name, best_map, best_score = None, None, -1
+    for name, df in tables.items():
+        mapping = {
+            "time":    next((c for c in TIME_ALIASES    if c in df.columns), None),
+            "segment": next((c for c in SEGMENT_ALIASES if c in df.columns), None),
+            "visits":  next((c for c in VISITS_ALIASES  if c in df.columns), None),
+            "leads":   next((c for c in LEADS_ALIASES   if c in df.columns), None),
+        }
+        score = sum(v is not None for v in mapping.values())
+        if score > best_score or (score == best_score and _priority_rank(name) < _priority_rank(best_name or "")):
+            best_name, best_map, best_score = name, mapping, score
+    return best_name, best_map, best_score
+
 
 # ────────────────────────────────────────────────────────────────────────────────
 # Data loading / registry
@@ -127,53 +168,74 @@ def execute_sql(sql_or_question: str) -> str:
     except Exception as e:
         return f"SQL error: {e}\n\n" + retrieve_business_context("") + "\n\nExamples:\n" + EXAMPLE_SQL
 
+# ------------------------------ Deterministic analyses ------------------------------
+
 def analyze_conversion_trends() -> str:
-    """Deterministic conversion rate trends by segment (auto-detect columns)."""
-    tbls = load_tables()
-    candidates = ["segment_analysis", "monthly_summary", "daily_summary",
-                  "channel_performance", "transaction_data"]
-    table_name = next((t for t in candidates if t in tbls), next(iter(tbls.keys())))
-    df = tbls[table_name].copy()
+    """
+    Compute monthly conversion rate by merchant segment from the best available table.
+    Returns CSV: month,merchant_segment,visits,leads,conversion_rate
+    """
+    tables = load_tables()
+    table_name, mapping, score = _pick_conversion_source(tables)
 
-    time_col = next((c for c in ["week_start", "date", "day", "month"] if c in df.columns), None)
-    seg_col  = next((c for c in ["merchant_segment", "segment", "customer_segment"] if c in df.columns), None)
-    visits   = next((c for c in ["total_visits", "sessions", "visits", "impressions"] if c in df.columns), None)
-    leads    = next((c for c in ["leads", "conversions", "signups"] if c in df.columns), None)
-
-    if not all([time_col, seg_col, visits, leads]):
+    if not table_name or score < 4:
         raise ValueError(
-            f"Missing required columns in `{table_name}`. "
+            "No single table has the required columns.\n"
             "Need time (week_start/date/day/month), segment (merchant_segment/segment/customer_segment), "
-            "visits (total_visits/sessions/visits/impressions), leads (leads/conversions/signups)."
+            "visits (total_visits/sessions/visits/impressions), leads (leads/conversions/converted/signups)."
         )
 
-    if not pd.api.types.is_datetime64_any_dtype(df[time_col]):
-        df[time_col] = pd.to_datetime(df[time_col], errors="coerce")
-    df["month"] = df[time_col].dt.to_period("M").astype(str)
+    df = tables[table_name].copy()
+    time_col, seg_col, visits_col, leads_col = (
+        mapping["time"], mapping["segment"], mapping["visits"], mapping["leads"]
+    )
 
-    g = df.groupby(["month", seg_col]).agg(
-        visits=(visits, "sum"),
-        leads=(leads, "sum"),
-    ).reset_index()
+    # Normalize time → month
+    if time_col == "month" and df[time_col].dtype == "O":
+        try:
+            df["month"] = pd.to_datetime(df[time_col], errors="coerce").dt.to_period("M").astype(str)
+        except Exception:
+            df["month"] = df[time_col].astype(str)
+    else:
+        if not pd.api.types.is_datetime64_any_dtype(df[time_col]):
+            df[time_col] = pd.to_datetime(df[time_col], errors="coerce")
+        df["month"] = df[time_col].dt.to_period("M").astype(str)
+
+    # Aggregate
+    g = (
+        df.groupby(["month", seg_col])
+          .agg(visits=(visits_col, "sum"), leads=(leads_col, "sum"))
+          .reset_index()
+    )
     g["conversion_rate"] = (g["leads"] / g["visits"]).replace([np.inf, -np.inf], 0).fillna(0.0)
 
-    pivot = g.pivot_table(index="month", columns=seg_col,
-                          values="conversion_rate", aggfunc="mean").round(4)
-    seg_avg = g.groupby(seg_col)["conversion_rate"].mean().sort_values(ascending=False).round(4)
-    monthly = g.groupby("month")["conversion_rate"].mean().round(4)
+    # Standardize column names for the UI
+    g = g.rename(columns={seg_col: "merchant_segment"})
+    g = g[["month", "merchant_segment", "visits", "leads", "conversion_rate"]]
+    g = g.sort_values(["month", "merchant_segment"])
 
-    return f"""
-🎯 CONVERSION RATE TRENDS BY SEGMENT (source: `{table_name}`)
+    # Return CSV so Streamlit renders table + line chart automatically
+    return g.to_csv(index=False)
 
-**Conversion by month & segment**
-{pivot.to_string()}
-
-**Segment averages**
-{seg_avg.to_string()}
-
-**Overall monthly trend**
-{monthly.to_string()}
-"""
+def revenue_by_business_unit() -> str:
+    """Return CSV: month,business_unit,revenue from monthly_summary if present."""
+    tables = load_tables()
+    if "monthly_summary" not in tables:
+        raise ValueError("monthly_summary.csv not found in ./data")
+    df = tables["monthly_summary"].copy()
+    # Normalize month
+    if df["month"].dtype == "O":
+        try:
+            df["month"] = pd.to_datetime(df["month"], errors="coerce").dt.to_period("M").astype(str)
+        except Exception:
+            df["month"] = df["month"].astype(str)
+    out = (
+        df.groupby(["month", "business_unit"])["revenue"]
+          .sum()
+          .reset_index()
+          .sort_values(["month", "business_unit"])
+    )
+    return out.to_csv(index=False)
 
 # ────────────────────────────────────────────────────────────────────────────────
 # Direct Gemini fallback (no LangChain, no agent)
@@ -207,13 +269,18 @@ def run_bi(question: str, api_key: Optional[str] = None) -> str:
     if ql.startswith("select") or ql.startswith("with "):
         return execute_sql(q)
 
-    # 2) common canned analysis path
+    # 2) deterministic routes
     if "conversion" in ql and "segment" in ql:
         try:
             return analyze_conversion_trends()
         except Exception as e:
-            # if data not found / columns missing, fall back to schema or llm
             return f"{retrieve_business_context('')}\n\n(Conversion analysis failed: {e})"
+
+    if ("revenue" in ql) and ("business unit" in ql or "business_unit" in ql or "unit" in ql):
+        try:
+            return revenue_by_business_unit()
+        except Exception as e:
+            return f"{retrieve_business_context('')}\n\n(Revenue analysis failed: {e})"
 
     # 3) non-agent LLM summary (never ReAct, never parser errors)
     return _fallback_llm_answer(q, api_key)
@@ -236,4 +303,5 @@ def create_agent(google_api_key: Optional[str] = None):
 if __name__ == "__main__":
     # smoke tests
     print(run_bi("conversion rate trends by merchant segment"))
+    print(run_bi("revenue by business unit"))
     print(run_bi("SELECT 1 AS a, 2 AS b"))
