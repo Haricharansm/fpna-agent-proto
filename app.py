@@ -1,245 +1,200 @@
-# app.py - Fixed Import Issues
+# app.py — FP&A UI with fast-path routing to fpna.run_bi
 import os
 import sys
+from io import StringIO
+
+import pandas as pd
 import streamlit as st
 
-# Fix import path - add current directory to Python path
+# -------------------------------------------------------------------
+# Paths & env
 current_dir = os.path.dirname(os.path.abspath(__file__))
 if current_dir not in sys.path:
     sys.path.append(current_dir)
 
-# Now try importing the FP&A agent
+os.environ.setdefault("DATA_DIR", os.path.join(current_dir, "data"))
+os.environ.setdefault("GEMINI_MODEL", "gemini-1.5-flash")
+os.environ.setdefault("AGENT_MAX_STEPS", "12")
+
+# Import agent/router from fpna.py
 try:
-    from fpna_agent import create_agent
-    AGENT_AVAILABLE = True
-except ImportError as e:
-    st.error(f"❌ Cannot import FP&A agent: {str(e)}")
-    st.info("📁 Please ensure fpna_agent.py is in the same directory as app.py")
-    AGENT_AVAILABLE = False
+    from fpna import run_bi  # one-call router that always returns an answer (string)
+    FPNA_AVAILABLE = True
+except Exception as e:
+    FPNA_AVAILABLE = False
+    fpna_import_err = str(e)
 
 st.set_page_config(
-    page_title="FP&A AI Agent", 
+    page_title="FP&A AI Agent",
     page_icon="📊",
     layout="wide",
-    initial_sidebar_state="expanded"
+    initial_sidebar_state="expanded",
 )
 
-# Professional header
+# -------------------------------------------------------------------
+# Header
 st.markdown("""
-    <div style='text-align: center; padding: 1rem 0;'>
-        <h1 style='color: #1e3a8a; margin: 0;'>📊 Financial Planning & Analysis</h1>
-        <h2 style='color: #64748b; margin: 0; font-weight: 400;'>AI-Powered Business Intelligence Agent</h2>
-    </div>
+<div style='text-align:center;padding:1rem 0;'>
+  <h1 style='color:#1e3a8a;margin:0;'>📊 Financial Planning & Analysis</h1>
+  <h2 style='color:#64748b;margin:0;font-weight:400;'>AI-Powered Business Intelligence Agent</h2>
+</div>
 """, unsafe_allow_html=True)
-
 st.markdown("---")
 
-# Show system status
-if not AGENT_AVAILABLE:
-    st.error("🚫 FP&A Agent not available - Import error")
-    st.info("📋 Please check that fpna_agent.py is in the same directory and all dependencies are installed")
+if not FPNA_AVAILABLE:
+    st.error(f"❌ Cannot import FP&A core (`fpna.py`): {fpna_import_err}")
+    st.info("📁 Make sure `fpna.py` is next to `app.py` and dependencies are installed.")
     st.stop()
 
-# Sidebar for configuration
+# -------------------------------------------------------------------
+# Sidebar
 with st.sidebar:
     st.header("🔧 Configuration")
-    
-    # API Key input (simplified)
     google_api_key = st.text_input(
         "AI Model API Key",
         type="password",
-        placeholder="Enter your API key...",
-        help="API key for AI model access"
+        placeholder="Enter your API key (only needed for LLM agent)…",
+        help="Gemini 1.5 key for model-backed analysis. Not required for canned/SQL paths."
     )
-    
-    # Status indicator
-    if google_api_key:
-        if len(google_api_key) > 20:  # Basic validation
-            st.success("✅ API Key configured")
-        else:
-            st.warning("⚠️ Please check API key format")
+    if google_api_key and len(google_api_key) > 20:
+        st.success("✅ API Key configured")
+    elif google_api_key:
+        st.warning("⚠️ Please check API key format")
     else:
-        st.info("🔑 API key required for analysis")
-    
+        st.info("🔑 API key optional for most demo queries")
+
     st.divider()
-    
-    # Data source
     st.subheader("Data Configuration")
-    data_source = st.selectbox(
-        "Data Source",
-        ["Demo Dataset", "Production Data"],
-        index=0,
-        help="Select data source for analysis"
-    )
-    
-    if data_source == "Demo Dataset":
-        st.info("📊 Using sample business data for demonstration")
-    else:
-        st.warning("🔒 Production data access requires additional configuration")
-    
+    st.caption(f"Using CSVs from: `{os.environ['DATA_DIR']}`")
+    st.info("📊 All CSVs in this folder are auto-registered as DuckDB tables.")
+
     st.divider()
-    
-    # Business context
     st.subheader("Business Context")
     st.markdown("""
-    **Current Period**: Q4 2024  
-    **Segments**: Retail, Wholesale, New Merchants  
-    **Metrics**: Revenue, Conversion, Volume  
-    **Analysis Period**: 8 weeks
-    """)
+**Current Period**: Q4 2024  
+**Segments**: Retail, Wholesale, New Merchants  
+**Metrics**: Revenue, Conversion, Volume  
+**Analysis Window**: 8 weeks
+""")
 
-# Main analysis interface
+# -------------------------------------------------------------------
+# Query UI
 st.markdown("### Business Intelligence Query")
-
-col1, col2 = st.columns([4, 1])
-
-with col1:
+c1, c2 = st.columns([4, 1])
+with c1:
     user_question = st.text_input(
         "Enter your business question:",
-        placeholder="Analyze conversion rates by merchant segment over the past month",
-        help="Ask questions about business performance, trends, or specific metrics",
-        label_visibility="collapsed"
+        placeholder="Conversion rate trends by merchant segment",
+        label_visibility="collapsed",
     )
+with c2:
+    st.write("")  # spacing
+    go = st.button("🔍 Analyze", use_container_width=True, type="primary")
 
-with col2:
-    st.write("")  # Spacing
-    analyze_button = st.button("🔍 Analyze", use_container_width=True, type="primary")
-
-# Professional example queries
 with st.expander("💼 Sample Business Questions"):
-    col_ex1, col_ex2 = st.columns(2)
-    
-    with col_ex1:
+    l, r = st.columns(2)
+    with l:
         st.markdown("""
-        **Performance Analysis:**
-        • Conversion rate trends by merchant segment
-        • Revenue performance across business units
-        • Transaction volume analysis by period
-        • Customer acquisition metrics by channel
-        """)
-    
-    with col_ex2:
+**Performance Analysis:**
+• Conversion rate trends by merchant segment  
+• Revenue performance across business units  
+• Transaction volume analysis by period  
+• Customer acquisition metrics by channel
+""")
+    with r:
         st.markdown("""
-        **Strategic Insights:**
-        • Impact assessment of recent feature launches
-        • Policy change performance evaluation
-        • Segment comparison and optimization opportunities  
-        • Growth trend analysis and forecasting
-        """)
+**Strategic Insights:**
+• Impact of recent feature launches  
+• Policy change performance evaluation  
+• Segment comparison & optimization opportunities  
+• Growth trend analysis and forecasting
+""")
 
-# Analysis execution
-if analyze_button:
-    if not AGENT_AVAILABLE:
-        st.error("❌ FP&A Agent not available - cannot process queries")
-        st.stop()
-    
+# -------------------------------------------------------------------
+# Helpers to render results nicely
+def _try_render_tabular(result_str: str) -> bool:
+    """If result looks like CSV, render a dataframe and a simple chart."""
+    try:
+        # quick sniff: must have a comma and a newline
+        if ("," not in result_str) or ("\n" not in result_str):
+            return False
+        df = pd.read_csv(StringIO(result_str))
+        if df.empty:
+            return False
+
+        st.dataframe(df, use_container_width=True)
+
+        # quick line chart if there's a time-like column
+        for time_col in ["period", "week_start", "date", "day", "month"]:
+            if time_col in df.columns:
+                try:
+                    df_plot = df.copy()
+                    df_plot[time_col] = pd.to_datetime(df_plot[time_col], errors="coerce")
+                    df_plot = df_plot.dropna(subset=[time_col])
+                    numeric_cols = df_plot.select_dtypes("number").columns.tolist()
+                    if numeric_cols:
+                        st.line_chart(data=df_plot.set_index(time_col)[numeric_cols])
+                        break
+                except Exception:
+                    pass
+                break
+        return True
+    except Exception:
+        return False
+
+# -------------------------------------------------------------------
+# Execute
+if go:
     if not user_question.strip():
-        st.warning("Please enter a business question to analyze.")
-    elif not google_api_key:
-        st.error("API key required. Please configure in the sidebar.")
+        st.warning("Please enter a business question.")
     else:
-        with st.spinner("Processing business intelligence query..."):
+        with st.spinner("Processing business intelligence query…"):
             try:
-                # Initialize AI agent
-                agent = create_agent(google_api_key=google_api_key)
-                
-                # Process the query
-                result = agent.run(f"Business Analysis Request: {user_question}")
-                
-                # Display professional results
+                # run_bi decides: deterministic path, direct SQL, or agent (if API key given)
+                result = run_bi(user_question, google_api_key or None)
+
                 st.success("Analysis Complete")
-                
-                # Results presentation
                 st.markdown("---")
                 st.markdown("## 📈 Business Intelligence Report")
-                
-                # Format the results professionally
-                st.markdown(result)
-                
-                # Additional insights section
+
+                # If it's csv-ish, show a table (and chart); otherwise print as markdown
+                rendered_tabular = _try_render_tabular(result)
+                if not rendered_tabular:
+                    st.markdown(result)
+
                 st.markdown("---")
                 with st.expander("📊 Analysis Details"):
-                    st.markdown("""
-                    **Data Sources**: Internal business metrics, transaction data, performance indicators  
-                    **Analysis Method**: AI-powered pattern recognition and statistical analysis  
-                    **Time Period**: Recent 8-week performance window  
-                    **Confidence Level**: High (based on comprehensive data analysis)
-                    """)
-                
+                    st.markdown(f"""
+**Data Sources**: CSVs in `{os.environ['DATA_DIR']}`  
+**Method**: DuckDB/Pandas (deterministic) and Gemini 1.5 (if needed)  
+**Agent Limits**: Steps={os.getenv('AGENT_MAX_STEPS','12')}, Model={os.getenv('GEMINI_MODEL','gemini-1.5-flash')}
+""")
             except Exception as e:
-                st.error("Analysis could not be completed at this time.")
-                
-                # Professional error handling
-                error_type = "configuration" if "API key" in str(e) else "processing"
-                
-                if error_type == "configuration":
-                    st.info("Please verify your API configuration and try again.")
-                else:
-                    st.info("Please try rephrasing your question or contact support if the issue persists.")
-                
-                # Show debug info
+                st.error("Analysis could not be completed.")
                 with st.expander("🔧 Technical Details", expanded=False):
                     st.code(str(e))
                     st.write("**Error Type:**", type(e).__name__)
 
-# Professional footer
+# -------------------------------------------------------------------
+# Footer
 st.markdown("---")
+c1, c2, c3 = st.columns(3)
+with c1:
+    st.markdown("**🎯 Capabilities**  \nReal-time analysis  \nMulti-segment insights  \nTrend identification")
+with c2:
+    st.markdown("**📊 Data Coverage**  \nRevenue metrics  \nConversion analytics  \nPerformance indicators")
+with c3:
+    st.markdown("**🚀 AI Features**  \nNatural language queries  \nAutomated insights  \nExecutive summaries")
 
-footer_col1, footer_col2, footer_col3 = st.columns(3)
-
-with footer_col1:
-    st.markdown("""
-    **🎯 Capabilities**  
-    Real-time analysis  
-    Multi-segment insights  
-    Trend identification
-    """)
-
-with footer_col2:
-    st.markdown("""
-    **📊 Data Coverage**  
-    Revenue metrics  
-    Conversion analytics  
-    Performance indicators
-    """)
-
-with footer_col3:
-    st.markdown("""
-    **🚀 AI Features**  
-    Natural language queries  
-    Automated insights  
-    Executive summaries
-    """)
-
-# Professional styling
+# Styling
 st.markdown("""
 <style>
-    .stSelectbox > div > div {
-        background-color: #f8fafc;
-    }
-    .stTextInput > div > div > input {
-        background-color: #f8fafc;
-    }
-    .stButton > button {
-        background-color: #1e40af;
-        color: white;
-        border-radius: 8px;
-        border: none;
-        padding: 0.5rem 1rem;
-        font-weight: 500;
-    }
-    .stButton > button:hover {
-        background-color: #1d4ed8;
-    }
-    .stSuccess {
-        background-color: #dcfce7;
-        border: 1px solid #22c55e;
-        border-radius: 8px;
-    }
-    .stInfo {
-        background-color: #dbeafe;
-        border: 1px solid #3b82f6;
-        border-radius: 8px;
-    }
+  .stSelectbox > div > div { background-color: #f8fafc; }
+  .stTextInput > div > div > input { background-color: #f8fafc; }
+  .stButton > button {
+    background-color: #1e40af; color: white; border-radius: 8px; border: none;
+    padding: .5rem 1rem; font-weight: 500;
+  }
+  .stButton > button:hover { background-color: #1d4ed8; }
 </style>
 """, unsafe_allow_html=True)
