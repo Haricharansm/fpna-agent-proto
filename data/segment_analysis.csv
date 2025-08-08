@@ -1,0 +1,6 @@
+merchant_segment,sessions,conversions,conversion_rate,revenue,avg_customer_acquisition_cost,revenue_per_session
+Startup,2667,89,0.0334,5664.95,22.51,2.12
+Standard,2663,168,0.0631,30832.83,22.5,11.58
+Small Business,2695,166,0.0616,14579.16,22.42,5.41
+Premium,2663,286,0.1074,144993.33,23.04,54.45
+Enterprise,2671,416,0.1557,524323.14,22.72,196.3

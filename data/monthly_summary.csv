@@ -1,0 +1,16 @@
+month,merchant_segment,business_unit,sessions,conversions,conversion_rate,revenue,avg_customer_acquisition_cost,feature_launch_period
+2024-10,Enterprise,Europe,972,146,0.1502,179678.84,23.4,0
+2024-10,Small Business,Europe,929,55,0.0592,4319.29,23.22,0
+2024-10,Startup,North America,944,28,0.0297,1848.95,22.46,0
+2024-10,Premium,Asia Pacific,877,91,0.1038,44663.98,23.39,0
+2024-10,Standard,Europe,934,50,0.0535,9519.75,23.16,0
+2024-11,Standard,Europe,919,72,0.0783,12413.23,22.87,0
+2024-11,Small Business,Latin America,891,53,0.0595,4858.12,23.37,0
+2024-11,Startup,Asia Pacific,892,36,0.0404,2099.84,23.16,0
+2024-11,Premium,North America,956,123,0.1287,63276.28,22.53,0
+2024-11,Enterprise,Europe,873,148,0.1695,183693.14,23.22,0
+2024-12,Enterprise,Latin America,983,197,0.2004,254757.38,22.61,1
+2024-12,Premium,Asia Pacific,909,122,0.1342,62034.03,23.14,1
+2024-12,Small Business,Europe,930,53,0.057,4735.29,22.04,1
+2024-12,Standard,North America,944,53,0.0561,9548.64,22.68,1
+2024-12,Startup,North America,896,40,0.0446,2370.99,23.28,1

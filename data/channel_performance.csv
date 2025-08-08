@@ -1,0 +1,31 @@
+acquisition_channel,merchant_segment,sessions,conversions,conversion_rate,revenue,avg_customer_acquisition_cost,revenue_per_session
+Direct,Enterprise,440,86,0.1955,111956.26,4.88,254.45
+Paid Search,Startup,489,14,0.0286,924.2,53.25,1.89
+Email,Standard,434,27,0.0622,4631.3,12.55,10.67
+Direct,Startup,468,22,0.047,1467.81,5.29,3.14
+Direct,Premium,495,73,0.1475,38708.61,4.83,78.2
+Paid Search,Standard,484,35,0.0723,6605.79,52.63,13.65
+Paid Search,Small Business,438,10,0.0228,1027.6,51.76,2.35
+Organic Search,Small Business,492,32,0.065,2712.64,20.25,5.51
+Direct,Small Business,449,31,0.069,2623.61,5.04,5.84
+Social Media,Standard,464,14,0.0302,2271.14,30.18,4.89
+Organic Search,Enterprise,421,67,0.1591,79916.71,19.93,189.83
+Email,Startup,510,26,0.051,1488.16,12.46,2.92
+Organic Search,Standard,463,39,0.0842,6992.96,19.87,15.1
+Email,Small Business,472,32,0.0678,2968.54,12.46,6.29
+Social Media,Enterprise,494,64,0.1296,90386.26,30.1,182.97
+Organic Search,Startup,447,22,0.0492,1676.03,20.58,3.75
+Paid Search,Premium,426,43,0.1009,21152.96,51.12,49.65
+Social Media,Startup,483,11,0.0228,722.7,29.18,1.5
+Referral,Premium,525,68,0.1295,35094.91,16.42,66.85
+Direct,Standard,430,36,0.0837,6730.4,5.06,15.65
+Paid Search,Enterprise,431,69,0.1601,92711.47,53.04,215.11
+Social Media,Premium,443,34,0.0767,16105.07,30.31,36.35
+Social Media,Small Business,431,20,0.0464,1871.92,29.69,4.34
+Organic Search,Premium,439,56,0.1276,28893.23,20.28,65.82
+Referral,Enterprise,429,60,0.1399,76945.88,16.82,179.36
+Referral,Standard,493,26,0.0527,4393.62,16.34,8.91
+Email,Enterprise,428,83,0.1939,105755.18,12.25,247.09
+Referral,Startup,461,20,0.0434,1247.98,16.39,2.71
+Email,Premium,444,54,0.1216,27227.44,12.46,61.32
+Referral,Small Business,435,27,0.0621,2783.01,16.54,6.4
