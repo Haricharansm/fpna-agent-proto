@@ -1,4 +1,4 @@
-# app.py — FP&A UI with fast-path routing to fpna.run_bi
+# app.py — robust imports + fast-path router
 import os
 import sys
 from io import StringIO
@@ -16,13 +16,34 @@ os.environ.setdefault("DATA_DIR", os.path.join(current_dir, "data"))
 os.environ.setdefault("GEMINI_MODEL", "gemini-1.5-flash")
 os.environ.setdefault("AGENT_MAX_STEPS", "12")
 
-# Import agent/router from fpna.py
+# -------------------------------------------------------------------
+# Try fpna.py first (has run_bi); fallback to fpna_agent.py
+HAVE_RUN_BI = False
+FPNA_CORE_OK = False
+err_msg = ""
+
 try:
-    from fpna import run_bi  # one-call router that always returns an answer (string)
-    FPNA_AVAILABLE = True
-except Exception as e:
-    FPNA_AVAILABLE = False
-    fpna_import_err = str(e)
+    from fpna import run_bi  # preferred
+    HAVE_RUN_BI = True
+    FPNA_CORE_OK = True
+except Exception as e1:
+    # Fallback: older module name / API
+    try:
+        from fpna_agent import create_agent  # noqa: F401
+        # Optional helpers if available
+        try:
+            from fpna_agent import execute_business_query as _exec_sql  # noqa: F401
+        except Exception:
+            _exec_sql = None
+        try:
+            from fpna_agent import analyze_monthly_conversion_rates as _conv_helper  # noqa: F401
+        except Exception:
+            _conv_helper = None
+        FPNA_CORE_OK = True
+        err_msg = ""
+    except Exception as e2:
+        FPNA_CORE_OK = False
+        err_msg = f"{e1}  |  {e2}"
 
 st.set_page_config(
     page_title="FP&A AI Agent",
@@ -41,9 +62,9 @@ st.markdown("""
 """, unsafe_allow_html=True)
 st.markdown("---")
 
-if not FPNA_AVAILABLE:
-    st.error(f"❌ Cannot import FP&A core (`fpna.py`): {fpna_import_err}")
-    st.info("📁 Make sure `fpna.py` is next to `app.py` and dependencies are installed.")
+if not FPNA_CORE_OK:
+    st.error(f"❌ Cannot import FP&A core: {err_msg}")
+    st.info("📁 Make sure either `fpna.py` or `fpna_agent.py` is next to `app.py` and dependencies are installed.")
     st.stop()
 
 # -------------------------------------------------------------------
@@ -88,7 +109,7 @@ with c1:
         label_visibility="collapsed",
     )
 with c2:
-    st.write("")  # spacing
+    st.write("")
     go = st.button("🔍 Analyze", use_container_width=True, type="primary")
 
 with st.expander("💼 Sample Business Questions"):
@@ -111,29 +132,25 @@ with st.expander("💼 Sample Business Questions"):
 """)
 
 # -------------------------------------------------------------------
-# Helpers to render results nicely
+# Helper: render CSV-ish responses nicely
 def _try_render_tabular(result_str: str) -> bool:
-    """If result looks like CSV, render a dataframe and a simple chart."""
     try:
-        # quick sniff: must have a comma and a newline
         if ("," not in result_str) or ("\n" not in result_str):
             return False
         df = pd.read_csv(StringIO(result_str))
         if df.empty:
             return False
-
         st.dataframe(df, use_container_width=True)
-
-        # quick line chart if there's a time-like column
+        # quick chart if time-like column exists
         for time_col in ["period", "week_start", "date", "day", "month"]:
             if time_col in df.columns:
                 try:
                     df_plot = df.copy()
                     df_plot[time_col] = pd.to_datetime(df_plot[time_col], errors="coerce")
                     df_plot = df_plot.dropna(subset=[time_col])
-                    numeric_cols = df_plot.select_dtypes("number").columns.tolist()
-                    if numeric_cols:
-                        st.line_chart(data=df_plot.set_index(time_col)[numeric_cols])
+                    num_cols = df_plot.select_dtypes("number").columns.tolist()
+                    if num_cols:
+                        st.line_chart(data=df_plot.set_index(time_col)[num_cols])
                         break
                 except Exception:
                     pass
@@ -143,6 +160,34 @@ def _try_render_tabular(result_str: str) -> bool:
         return False
 
 # -------------------------------------------------------------------
+# Router (uses fpna.run_bi if available; otherwise emulate)
+def _run_query(question: str, api_key: str | None):
+    q = (question or "").strip()
+    ql = q.lower()
+
+    if HAVE_RUN_BI:
+        # Preferred new API
+        return run_bi(q, api_key or None)
+
+    # Fallback behavior using fpna_agent.py
+    # 1) direct SQL path
+    if ql.startswith("select") or ql.startswith("with "):
+        if '_exec_sql' in globals() and _exec_sql:
+            return _exec_sql(q)
+        return "SQL engine not exposed by fpna_agent; please update to latest fpna core."
+
+    # 2) common canned analysis path
+    if ("conversion" in ql and "segment" in ql) and ('_conv_helper' in globals()) and _conv_helper:
+        return _conv_helper()
+
+    # 3) agent path requires API key
+    if not api_key:
+        return "API key required for agent-backed analysis. Enter it in the sidebar."
+    from fpna_agent import create_agent  # local import to avoid confusion
+    agent = create_agent(google_api_key=api_key)
+    return agent.run(q)
+
+# -------------------------------------------------------------------
 # Execute
 if go:
     if not user_question.strip():
@@ -150,16 +195,14 @@ if go:
     else:
         with st.spinner("Processing business intelligence query…"):
             try:
-                # run_bi decides: deterministic path, direct SQL, or agent (if API key given)
-                result = run_bi(user_question, google_api_key or None)
+                result = _run_query(user_question, google_api_key or None)
 
                 st.success("Analysis Complete")
                 st.markdown("---")
                 st.markdown("## 📈 Business Intelligence Report")
 
-                # If it's csv-ish, show a table (and chart); otherwise print as markdown
-                rendered_tabular = _try_render_tabular(result)
-                if not rendered_tabular:
+                # Render CSV-ish tables if possible; otherwise show as markdown/text
+                if not _try_render_tabular(result):
                     st.markdown(result)
 
                 st.markdown("---")
@@ -176,7 +219,7 @@ if go:
                     st.write("**Error Type:**", type(e).__name__)
 
 # -------------------------------------------------------------------
-# Footer
+# Footer + light styling
 st.markdown("---")
 c1, c2, c3 = st.columns(3)
 with c1:
@@ -186,7 +229,6 @@ with c2:
 with c3:
     st.markdown("**🚀 AI Features**  \nNatural language queries  \nAutomated insights  \nExecutive summaries")
 
-# Styling
 st.markdown("""
 <style>
   .stSelectbox > div > div { background-color: #f8fafc; }
