@@ -1,5 +1,11 @@
 # fpna.py — FP&A Agent using CSVs from ./data (DuckDB + Gemini 1.5 only)
-# Fast-path router included to avoid agent timeouts for common asks
+# - Auto-loads all CSVs in ./data (or DATA_DIR env var)
+# - Registers each as a DuckDB table (table name = file name without .csv)
+# - Tools: BusinessContext (schema), BusinessIntelligenceQuery (run SQL), ConversionTrendAnalysis (helper)
+# - LLM: Gemini 1.5 only (flash/pro). NEVER tries gemini-pro.
+# - Fallbacks: deterministic pandas/DuckDB; non-agent LLM summary; no crash on parser errors.
+
+from __future__ import annotations
 
 import os
 import glob
@@ -9,30 +15,29 @@ from textwrap import shorten
 import pandas as pd
 import numpy as np
 
-# DuckDB can be optional; we guard usage
+# DuckDB (optional but preferred)
 try:
-    import duckdb
+    import duckdb  # type: ignore
     HAVE_DUCKDB = True
 except Exception:
     duckdb = None
     HAVE_DUCKDB = False
 
-# ────────────────────────────────────────────────────────────────────────────────
-# LangChain / agent (optional but preferred)
+# LangChain (optional)
 try:
-    from langchain.agents import initialize_agent, Tool
-    from langchain.agents import AgentType
+    from langchain.agents import initialize_agent, Tool, AgentType  # type: ignore
     LANGCHAIN_OK = True
 except Exception:
     LANGCHAIN_OK = False
 
-# Gemini (AI Studio) — 1.5 only
+# Gemini via LangChain (AI Studio)
 GEMINI_OK = False
 try:
-    from langchain_google_genai import ChatGoogleGenerativeAI
+    from langchain_google_genai import ChatGoogleGenerativeAI  # type: ignore
     GEMINI_OK = True
 except Exception:
     GEMINI_OK = False
+
 
 # ────────────────────────────────────────────────────────────────────────────────
 # Data loading / registry
@@ -40,13 +45,15 @@ except Exception:
 DATA_DIR = os.environ.get("DATA_DIR", "data")
 
 def _read_csv(path: str) -> pd.DataFrame:
+    """Read a CSV, parsing common date columns if present."""
     df = pd.read_csv(path)
-    for col in ["date", "day", "week_start", "month"]:
+    for col in ("date", "day", "week_start", "month"):
         if col in df.columns:
             df[col] = pd.to_datetime(df[col], errors="ignore")
     return df
 
 def load_tables(data_dir: str = DATA_DIR) -> Dict[str, pd.DataFrame]:
+    """Load all CSVs from data_dir -> {table_name: DataFrame}."""
     tables: Dict[str, pd.DataFrame] = {}
     for csv_path in sorted(glob.glob(os.path.join(data_dir, "*.csv"))):
         name = os.path.splitext(os.path.basename(csv_path))[0].lower()
@@ -56,6 +63,7 @@ def load_tables(data_dir: str = DATA_DIR) -> Dict[str, pd.DataFrame]:
     return tables
 
 def register_duckdb(tables: Dict[str, pd.DataFrame]):
+    """Register DataFrames as DuckDB tables."""
     if not HAVE_DUCKDB:
         raise RuntimeError("DuckDB not installed. Add `duckdb` to requirements.txt and restart.")
     con = duckdb.connect()
@@ -64,7 +72,7 @@ def register_duckdb(tables: Dict[str, pd.DataFrame]):
     return con
 
 def schema_summary(tables: Dict[str, pd.DataFrame], sample_rows: int = 1) -> str:
-    # Kept short to avoid agent token/iteration blow-ups
+    """Short schema (to keep LLM context lean)."""
     lines = ["**Available tables (from ./data):**"]
     for name, df in tables.items():
         cols = ", ".join(df.columns.tolist()[:12])
@@ -78,10 +86,12 @@ def schema_summary(tables: Dict[str, pd.DataFrame], sample_rows: int = 1) -> str
             pass
     return "\n".join(lines)
 
+
 # ────────────────────────────────────────────────────────────────────────────────
 # Tools
 
 def retrieve_business_context(_: str) -> str:
+    """Return business context + live schema."""
     tbls = load_tables()
     ctx = (
         "**Business Context (Demo)**\n"
@@ -93,7 +103,7 @@ def retrieve_business_context(_: str) -> str:
     return ctx + schema_summary(tbls)
 
 EXAMPLE_SQL = """
--- Adjust table/column names to your ./data schema.
+-- Adjust names to match your ./data schema.
 
 -- 1) Conversion rate trends by segment
 SELECT COALESCE(week_start, date, month) AS period, merchant_segment,
@@ -123,6 +133,10 @@ ORDER BY 2 DESC;
 """.strip()
 
 def execute_sql(sql_or_question: str) -> str:
+    """
+    Run a SELECT/CTE against DuckDB tables registered from ./data.
+    If input isn't SQL, return schema + examples.
+    """
     q = (sql_or_question or "").strip()
     is_sql = q.lower().startswith("select") or q.lower().startswith("with ")
     if not is_sql:
@@ -135,7 +149,10 @@ def execute_sql(sql_or_question: str) -> str:
         return f"SQL error: {e}\n\n" + retrieve_business_context("") + "\n\nExamples:\n" + EXAMPLE_SQL
 
 def analyze_conversion_trends() -> str:
-    """Deterministic path for 'conversion rate trends by merchant segment'."""
+    """
+    Deterministic path for 'conversion rate trends by merchant segment'.
+    Attempts to auto-detect time/segment/visits/leads columns.
+    """
     tbls = load_tables()
     candidates = ["segment_analysis", "monthly_summary", "daily_summary", "channel_performance", "transaction_data"]
     table_name = next((t for t in candidates if t in tbls), next(iter(tbls.keys())))
@@ -157,7 +174,7 @@ def analyze_conversion_trends() -> str:
         df[time_col] = pd.to_datetime(df[time_col], errors="coerce")
     df["month"] = df[time_col].dt.to_period("M").astype(str)
 
-    g = df.groupby(["month", seg_col]).agg(visits=(visits,"sum"), leads=(leads,"sum")).reset_index()
+    g = df.groupby(["month", seg_col]).agg(visits=(visits, "sum"), leads=(leads, "sum")).reset_index()
     g["conversion_rate"] = (g["leads"] / g["visits"]).replace([np.inf, -np.inf], 0).fillna(0.0)
 
     pivot = g.pivot_table(index="month", columns=seg_col, values="conversion_rate", aggfunc="mean").round(4)
@@ -177,27 +194,44 @@ def analyze_conversion_trends() -> str:
 {monthly.to_string()}
 """
 
-# ────────────────────────────────────────────────────────────────────────────────
-# Fallback agent (no LLM required)
-
-class ReliableAgent:
-    def run(self, q: str) -> str:
-        ql = (q or "").lower()
-        if "conversion" in ql and "segment" in ql:
-            return analyze_conversion_trends()
-        if ql.startswith("select") or ql.startswith("with "):
-            return execute_sql(q)
-        return retrieve_business_context("")
 
 # ────────────────────────────────────────────────────────────────────────────────
-# Agent factory — Gemini 1.5 only (NEVER gemini-pro)
+# Fallback LLM (non-agent) to avoid OutputParserException crashes
+
+def _fallback_llm_answer(question: str, api_key: Optional[str]) -> str:
+    """If the agent can't parse, answer directly without tool-calling."""
+    if not (GEMINI_OK and api_key):
+        return retrieve_business_context("") + "\n\nTip: start your query with SELECT to run SQL directly."
+    try:
+        model_name = os.environ.get("GEMINI_MODEL", "gemini-1.5-flash")
+        llm = ChatGoogleGenerativeAI(
+            model=model_name,
+            google_api_key=api_key,
+            temperature=0.2,
+            timeout=60,
+        )
+        ctx = retrieve_business_context("")
+        prompt = (
+            "You are a senior FP&A analyst. Using ONLY the context below, "
+            "write a concise executive answer. If data is needed, propose 1–2 SQL queries "
+            "against the listed tables (no tool calls, just SQL text).\n\n"
+            f"Question:\n{question}\n\nContext:\n{ctx}\n\nAnswer:"
+        )
+        resp = llm.invoke(prompt)
+        return getattr(resp, "content", str(resp))
+    except Exception as e:
+        return f"{retrieve_business_context('')}\n\n(LLM fallback failed: {e})"
+
+
+# ────────────────────────────────────────────────────────────────────────────────
+# Agent (tool-using) — Gemini 1.5 only
 
 def create_agent(google_api_key: Optional[str] = None):
-    """Tool-using agent if possible; otherwise ReliableAgent."""
+    """Tool-using agent if possible; otherwise ReliableAgent()."""
     if not (LANGCHAIN_OK and GEMINI_OK and google_api_key):
         return ReliableAgent()
 
-    # Only try 1.5 models
+    # Only try 1.5 models (some SDKs want 'models/...' names)
     MODEL_ATTEMPTS = [
         os.environ.get("GEMINI_MODEL", "gemini-1.5-flash"),
         "gemini-1.5-pro",
@@ -212,9 +246,9 @@ def create_agent(google_api_key: Optional[str] = None):
                 model=m,
                 google_api_key=google_api_key,
                 temperature=0.1,
-                timeout=60,  # ↑ more time so it actually finishes
+                timeout=60,  # generous so it actually finishes
             )
-            _ = llm.invoke("ok")
+            _ = llm.invoke("ok")  # sanity ping
             break
         except Exception:
             llm = None
@@ -224,12 +258,21 @@ def create_agent(google_api_key: Optional[str] = None):
         return ReliableAgent()
 
     tools = [
-        Tool(name="BusinessContext", func=retrieve_business_context,
-             description="List tables from ./data with columns and tiny samples."),
-        Tool(name="BusinessIntelligenceQuery", func=execute_sql,
-             description="Run a SQL SELECT over DuckDB tables registered from ./data/*.csv."),
-        Tool(name="ConversionTrendAnalysis", func=analyze_conversion_trends,
-             description="Compute conversion rate trends by segment deterministically."),
+        Tool(
+            name="BusinessContext",
+            func=retrieve_business_context,
+            description="List tables from ./data with columns and tiny samples."
+        ),
+        Tool(
+            name="BusinessIntelligenceQuery",
+            func=execute_sql,
+            description="Run a SQL SELECT over DuckDB tables registered from ./data/*.csv."
+        ),
+        Tool(
+            name="ConversionTrendAnalysis",
+            func=analyze_conversion_trends,
+            description="Compute conversion rate trends by segment deterministically."
+        ),
     ]
 
     return initialize_agent(
@@ -239,7 +282,7 @@ def create_agent(google_api_key: Optional[str] = None):
         verbose=False,
         handle_parsing_errors=True,
         early_stopping_method="generate",
-        max_iterations=int(os.getenv("AGENT_MAX_STEPS", "12")),  # ↑ more steps
+        max_iterations=int(os.getenv("AGENT_MAX_STEPS", "12")),
         agent_kwargs={
             "prefix": (
                 "You are a senior FP&A analyst. Use BusinessContext to learn the CSV schema from ./data. "
@@ -252,21 +295,56 @@ def create_agent(google_api_key: Optional[str] = None):
         },
     )
 
-# ────────────────────────────────────────────────────────────────────────────────
-# One-call router that always returns an answer (string)
-def run_bi(question: str, api_key: Optional[str] = None) -> str:
-    q = (question or "").strip()
-    ql = q.lower()
-    # 1) direct SQL
-    if ql.startswith("select") or ql.startswith("with "):
-        return execute_sql(q)
-    # 2) common ask
-    if "conversion" in ql and "segment" in ql:
-        return analyze_conversion_trends()
-    # 3) agent fallback
-    agent = create_agent(api_key)
-    return agent.run(q)
 
 # ────────────────────────────────────────────────────────────────────────────────
+# Fallback agent (no LLM required)
+
+class ReliableAgent:
+    """Deterministic paths; never fails."""
+    def run(self, q: str) -> str:
+        ql = (q or "").lower()
+        if "conversion" in ql and "segment" in ql:
+            return analyze_conversion_trends()
+        if ql.startswith("select") or ql.startswith("with "):
+            return execute_sql(q)
+        return retrieve_business_context("")
+
+
+# ────────────────────────────────────────────────────────────────────────────────
+# Public router — always returns an answer (string)
+
+def run_bi(question: str, api_key: Optional[str] = None) -> str:
+    """
+    One-call BI entrypoint:
+      - Direct SQL if question starts with SELECT/WITH
+      - Deterministic conversion-trend helper for common ask
+      - Otherwise try tool-using agent; on parser/agent errors, fall back to non-agent LLM
+    """
+    q = (question or "").strip()
+    ql = q.lower()
+
+    # 1) direct SQL path
+    if ql.startswith("select") or ql.startswith("with "):
+        return execute_sql(q)
+
+    # 2) common canned analysis path
+    if "conversion" in ql and "segment" in ql:
+        return analyze_conversion_trends()
+
+    # 3) agent path
+    agent = create_agent(api_key)
+    try:
+        return agent.run(q)
+    except Exception as e:
+        # Catch LangChain parser issues (OutputParserException, etc.) & anything else
+        err_txt = f"{type(e).__name__}: {e}"
+        if "OutputParser" in err_txt or "Could not parse LLM output" in err_txt:
+            return _fallback_llm_answer(q, api_key)
+        return _fallback_llm_answer(q, api_key)
+
+
+# ────────────────────────────────────────────────────────────────────────────────
+
 if __name__ == "__main__":
+    # Smoke test (works without API key for deterministic path)
     print(run_bi("conversion rate trends by merchant segment", os.environ.get("GOOGLE_API_KEY")))
