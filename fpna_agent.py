@@ -1,9 +1,5 @@
 # fpna.py — FP&A Agent using CSVs from ./data (DuckDB + Gemini 1.5 only)
-# - Auto-loads all CSVs in ./data (or DATA_DIR env var)
-# - Registers each as a DuckDB table (table name = file name without .csv)
-# - Tools: BusinessContext (schema), BusinessIntelligenceQuery (run SQL), ConversionTrendAnalysis (helper)
-# - LLM: Gemini 1.5 (flash/pro) ONLY — never tries gemini-pro
-# - Fallback: ReliableAgent that still answers without LLM
+# Fast-path router included to avoid agent timeouts for common asks
 
 import os
 import glob
@@ -12,7 +8,14 @@ from textwrap import shorten
 
 import pandas as pd
 import numpy as np
-import duckdb
+
+# DuckDB can be optional; we guard usage
+try:
+    import duckdb
+    HAVE_DUCKDB = True
+except Exception:
+    duckdb = None
+    HAVE_DUCKDB = False
 
 # ────────────────────────────────────────────────────────────────────────────────
 # LangChain / agent (optional but preferred)
@@ -31,14 +34,12 @@ try:
 except Exception:
     GEMINI_OK = False
 
-
 # ────────────────────────────────────────────────────────────────────────────────
 # Data loading / registry
 
 DATA_DIR = os.environ.get("DATA_DIR", "data")
 
 def _read_csv(path: str) -> pd.DataFrame:
-    """Read a CSV, parsing common dateish columns if present."""
     df = pd.read_csv(path)
     for col in ["date", "day", "week_start", "month"]:
         if col in df.columns:
@@ -46,7 +47,6 @@ def _read_csv(path: str) -> pd.DataFrame:
     return df
 
 def load_tables(data_dir: str = DATA_DIR) -> Dict[str, pd.DataFrame]:
-    """Load all CSVs from data_dir -> {table_name: DataFrame}."""
     tables: Dict[str, pd.DataFrame] = {}
     for csv_path in sorted(glob.glob(os.path.join(data_dir, "*.csv"))):
         name = os.path.splitext(os.path.basename(csv_path))[0].lower()
@@ -55,45 +55,46 @@ def load_tables(data_dir: str = DATA_DIR) -> Dict[str, pd.DataFrame]:
         raise FileNotFoundError(f"No CSV files found in {data_dir}/")
     return tables
 
-def register_duckdb(tables: Dict[str, pd.DataFrame]) -> duckdb.DuckDBPyConnection:
-    """Register each DataFrame as a DuckDB table of the same name."""
+def register_duckdb(tables: Dict[str, pd.DataFrame]):
+    if not HAVE_DUCKDB:
+        raise RuntimeError("DuckDB not installed. Add `duckdb` to requirements.txt and restart.")
     con = duckdb.connect()
     for name, df in tables.items():
         con.register(name, df)
     return con
 
-def schema_summary(tables: Dict[str, pd.DataFrame], sample_rows: int = 2) -> str:
-    """Human-readable schema description with a couple sample rows per table."""
-    lines = ["**Available tables (DuckDB registered from ./data):**"]
+def schema_summary(tables: Dict[str, pd.DataFrame], sample_rows: int = 1) -> str:
+    # Kept short to avoid agent token/iteration blow-ups
+    lines = ["**Available tables (from ./data):**"]
     for name, df in tables.items():
-        cols = ", ".join(df.columns.tolist())
-        lines.append(f"• {name} ({len(df)} rows) — columns: {cols}")
+        cols = ", ".join(df.columns.tolist()[:12])
+        lines.append(f"• {name} ({len(df)} rows) — {cols}")
         try:
             sample = df.head(sample_rows)
             for _, row in sample.iterrows():
-                preview = ", ".join(f"{k}={shorten(str(v), width=30)}" for k, v in row.items())
+                preview = ", ".join(f"{k}={shorten(str(v), 26)}" for k, v in row.items())
                 lines.append(f"    - {preview}")
         except Exception:
             pass
     return "\n".join(lines)
 
-
 # ────────────────────────────────────────────────────────────────────────────────
 # Tools
 
 def retrieve_business_context(_: str) -> str:
-    """Return schema + light business context so the LLM can write correct SQL."""
     tbls = load_tables()
     ctx = (
         "**Business Context (Demo)**\n"
-        "- You are analyzing CSVs from ./data (e.g., segment_analysis, channel_performance,\n"
-        "  daily_summary, monthly_summary, transaction_data). Common asks: conversion by segment,\n"
-        "  revenue by business unit, transaction trends, channel mix, feature/policy impacts.\n\n"
+        "- CSVs loaded from ./data (e.g., segment_analysis, channel_performance,\n"
+        "  daily_summary, monthly_summary, transaction_data).\n"
+        "- Typical asks: conversion by segment, revenue by unit, transaction trends,\n"
+        "  channel mix, feature/policy impact.\n\n"
     )
     return ctx + schema_summary(tbls)
 
 EXAMPLE_SQL = """
--- Examples (adjust table/column names to ones that exist in your ./data):
+-- Adjust table/column names to your ./data schema.
+
 -- 1) Conversion rate trends by segment
 SELECT COALESCE(week_start, date, month) AS period, merchant_segment,
        SUM(leads)*1.0/NULLIF(SUM(total_visits),0) AS conversion_rate
@@ -122,10 +123,6 @@ ORDER BY 2 DESC;
 """.strip()
 
 def execute_sql(sql_or_question: str) -> str:
-    """
-    Run a SELECT/CTE against DuckDB tables registered from ./data.
-    If the input isn't SQL, return schema + example queries.
-    """
     q = (sql_or_question or "").strip()
     is_sql = q.lower().startswith("select") or q.lower().startswith("with ")
     if not is_sql:
@@ -138,17 +135,12 @@ def execute_sql(sql_or_question: str) -> str:
         return f"SQL error: {e}\n\n" + retrieve_business_context("") + "\n\nExamples:\n" + EXAMPLE_SQL
 
 def analyze_conversion_trends() -> str:
-    """
-    Heuristic helper: find a table with {segment + visits + leads} and compute monthly conversion.
-    Tries common table/column names (works with many simple CSVs).
-    """
+    """Deterministic path for 'conversion rate trends by merchant segment'."""
     tbls = load_tables()
-    # choose a likely table
     candidates = ["segment_analysis", "monthly_summary", "daily_summary", "channel_performance", "transaction_data"]
     table_name = next((t for t in candidates if t in tbls), next(iter(tbls.keys())))
     df = tbls[table_name].copy()
 
-    # guess columns
     time_col = next((c for c in ["week_start", "date", "day", "month"] if c in df.columns), None)
     seg_col  = next((c for c in ["merchant_segment", "segment", "customer_segment"] if c in df.columns), None)
     visits   = next((c for c in ["total_visits", "sessions", "visits", "impressions"] if c in df.columns), None)
@@ -156,22 +148,16 @@ def analyze_conversion_trends() -> str:
 
     if time_col is None or seg_col is None or visits is None or leads is None:
         raise ValueError(
-            f"Could not auto-detect required columns in `{table_name}`. "
-            f"Need time, segment, visits, leads. "
-            f"Time looked for one of: week_start,date,day,month; "
-            f"segment: merchant_segment,segment,customer_segment; "
-            f"visits: total_visits,sessions,visits,impressions; "
-            f"leads: leads,conversions,signups."
+            f"Missing required columns in `{table_name}`. "
+            "Need time (week_start/date/day/month), segment (merchant_segment/segment/customer_segment), "
+            "visits (total_visits/sessions/visits/impressions), leads (leads/conversions/signups)."
         )
 
     if not pd.api.types.is_datetime64_any_dtype(df[time_col]):
         df[time_col] = pd.to_datetime(df[time_col], errors="coerce")
     df["month"] = df[time_col].dt.to_period("M").astype(str)
 
-    g = df.groupby(["month", seg_col]).agg(
-        visits=(visits, "sum"),
-        leads=(leads, "sum"),
-    ).reset_index()
+    g = df.groupby(["month", seg_col]).agg(visits=(visits,"sum"), leads=(leads,"sum")).reset_index()
     g["conversion_rate"] = (g["leads"] / g["visits"]).replace([np.inf, -np.inf], 0).fillna(0.0)
 
     pivot = g.pivot_table(index="month", columns=seg_col, values="conversion_rate", aggfunc="mean").round(4)
@@ -179,18 +165,17 @@ def analyze_conversion_trends() -> str:
     monthly = g.groupby("month")["conversion_rate"].mean().round(4)
 
     return f"""
-🎯 CONVERSION RATE TRENDS BY SEGMENT (auto-detected table: `{table_name}`)
+🎯 CONVERSION RATE TRENDS BY SEGMENT (source: `{table_name}`)
 
-📈 Conversion by month & segment:
+**Conversion by month & segment**
 {pivot.to_string()}
 
-🏆 Segment averages:
+**Segment averages**
 {seg_avg.to_string()}
 
-📅 Overall monthly trend:
+**Overall monthly trend**
 {monthly.to_string()}
 """
-
 
 # ────────────────────────────────────────────────────────────────────────────────
 # Fallback agent (no LLM required)
@@ -204,22 +189,15 @@ class ReliableAgent:
             return execute_sql(q)
         return retrieve_business_context("")
 
-
 # ────────────────────────────────────────────────────────────────────────────────
 # Agent factory — Gemini 1.5 only (NEVER gemini-pro)
 
 def create_agent(google_api_key: Optional[str] = None):
-    """
-    If LangChain + Gemini are available, return a tool-using agent that:
-      - retrieves schema/context
-      - executes SQL over ./data tables
-      - runs conversion trend helper
-    Otherwise, return ReliableAgent().
-    """
+    """Tool-using agent if possible; otherwise ReliableAgent."""
     if not (LANGCHAIN_OK and GEMINI_OK and google_api_key):
         return ReliableAgent()
 
-    # Try ONLY 1.5 models; some SDKs accept 'models/...' names
+    # Only try 1.5 models
     MODEL_ATTEMPTS = [
         os.environ.get("GEMINI_MODEL", "gemini-1.5-flash"),
         "gemini-1.5-pro",
@@ -234,9 +212,9 @@ def create_agent(google_api_key: Optional[str] = None):
                 model=m,
                 google_api_key=google_api_key,
                 temperature=0.1,
-                timeout=15,
+                timeout=60,  # ↑ more time so it actually finishes
             )
-            _ = llm.invoke("ok")  # quick sanity ping
+            _ = llm.invoke("ok")
             break
         except Exception:
             llm = None
@@ -246,21 +224,12 @@ def create_agent(google_api_key: Optional[str] = None):
         return ReliableAgent()
 
     tools = [
-        Tool(
-            name="BusinessContext",
-            func=retrieve_business_context,
-            description="Returns the list of available tables (from ./data) with columns and small samples."
-        ),
-        Tool(
-            name="BusinessIntelligenceQuery",
-            func=execute_sql,
-            description="Executes a SQL SELECT against DuckDB tables registered from ./data/*.csv."
-        ),
-        Tool(
-            name="ConversionTrendAnalysis",
-            func=analyze_conversion_trends,
-            description="Auto-detects an appropriate table to compute conversion rate trends by segment."
-        ),
+        Tool(name="BusinessContext", func=retrieve_business_context,
+             description="List tables from ./data with columns and tiny samples."),
+        Tool(name="BusinessIntelligenceQuery", func=execute_sql,
+             description="Run a SQL SELECT over DuckDB tables registered from ./data/*.csv."),
+        Tool(name="ConversionTrendAnalysis", func=analyze_conversion_trends,
+             description="Compute conversion rate trends by segment deterministically."),
     ]
 
     return initialize_agent(
@@ -269,23 +238,35 @@ def create_agent(google_api_key: Optional[str] = None):
         agent=AgentType.ZERO_SHOT_REACT_DESCRIPTION,
         verbose=False,
         handle_parsing_errors=True,
-        max_iterations=4,
+        early_stopping_method="generate",
+        max_iterations=int(os.getenv("AGENT_MAX_STEPS", "12")),  # ↑ more steps
         agent_kwargs={
             "prefix": (
-                "You are a senior FP&A analyst. Use BusinessContext to learn the schema of CSV tables "
-                "loaded from ./data. For quantitative questions, call BusinessIntelligenceQuery with a "
-                "concrete SQL SELECT. For 'conversion trends by segment', you may call ConversionTrendAnalysis."
+                "You are a senior FP&A analyst. Use BusinessContext to learn the CSV schema from ./data. "
+                "For quantitative questions, call BusinessIntelligenceQuery with a concrete SQL SELECT. "
+                "For 'conversion rate trends by merchant segment', call ConversionTrendAnalysis."
             ),
             "format_instructions": (
-                "Thought → Action → Observation loop.\n"
-                "When unsure which table/columns to use, call BusinessContext first."
+                "Thought → Action → Observation loop. When unsure which table/columns to use, call BusinessContext first."
             ),
         },
     )
 
+# ────────────────────────────────────────────────────────────────────────────────
+# One-call router that always returns an answer (string)
+def run_bi(question: str, api_key: Optional[str] = None) -> str:
+    q = (question or "").strip()
+    ql = q.lower()
+    # 1) direct SQL
+    if ql.startswith("select") or ql.startswith("with "):
+        return execute_sql(q)
+    # 2) common ask
+    if "conversion" in ql and "segment" in ql:
+        return analyze_conversion_trends()
+    # 3) agent fallback
+    agent = create_agent(api_key)
+    return agent.run(q)
 
 # ────────────────────────────────────────────────────────────────────────────────
 if __name__ == "__main__":
-    # Smoke test without LLM
-    agent = create_agent(os.environ.get("GOOGLE_API_KEY"))
-    print(agent.run("conversion rate trends by merchant segment"))
+    print(run_bi("conversion rate trends by merchant segment", os.environ.get("GOOGLE_API_KEY")))
