@@ -1,7 +1,21 @@
-# app.py - Professional FP&A AI Agent Demo
+# app.py - Fixed Import Issues
 import os
+import sys
 import streamlit as st
-from fpna_agent import create_agent
+
+# Fix import path - add current directory to Python path
+current_dir = os.path.dirname(os.path.abspath(__file__))
+if current_dir not in sys.path:
+    sys.path.append(current_dir)
+
+# Now try importing the FP&A agent
+try:
+    from fpna_agent import create_agent
+    AGENT_AVAILABLE = True
+except ImportError as e:
+    st.error(f"❌ Cannot import FP&A agent: {str(e)}")
+    st.info("📁 Please ensure fpna_agent.py is in the same directory as app.py")
+    AGENT_AVAILABLE = False
 
 st.set_page_config(
     page_title="FP&A AI Agent", 
@@ -19,6 +33,12 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 st.markdown("---")
+
+# Show system status
+if not AGENT_AVAILABLE:
+    st.error("🚫 FP&A Agent not available - Import error")
+    st.info("📋 Please check that fpna_agent.py is in the same directory and all dependencies are installed")
+    st.stop()
 
 # Sidebar for configuration
 with st.sidebar:
@@ -109,6 +129,10 @@ with st.expander("💼 Sample Business Questions"):
 
 # Analysis execution
 if analyze_button:
+    if not AGENT_AVAILABLE:
+        st.error("❌ FP&A Agent not available - cannot process queries")
+        st.stop()
+    
     if not user_question.strip():
         st.warning("Please enter a business question to analyze.")
     elif not google_api_key:
@@ -153,9 +177,10 @@ if analyze_button:
                 else:
                     st.info("Please try rephrasing your question or contact support if the issue persists.")
                 
-                # Optional debug for internal use
-                if st.checkbox("Show technical details", help="For troubleshooting purposes"):
+                # Show debug info
+                with st.expander("🔧 Technical Details", expanded=False):
                     st.code(str(e))
+                    st.write("**Error Type:**", type(e).__name__)
 
 # Professional footer
 st.markdown("---")
