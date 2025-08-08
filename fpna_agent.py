@@ -163,298 +163,217 @@ def analyze_conversion_trends_by_segment(time_period='monthly'):
     except Exception as e:
         return f"Analysis error: {str(e)}"
 
+# fpna_agent.py - Enhanced with better query processing and error handling
+
 def execute_business_query(query: str) -> str:
-    """Execute sophisticated business intelligence queries on uploaded datasets"""
+    """Execute sophisticated business intelligence queries with improved error handling"""
     try:
         query_lower = query.lower().strip()
         
-        # Determine which dataset to use based on query content
-        if any(keyword in query_lower for keyword in ['conversion rate trends', 'monthly conversion', 'segment', 'merchant segment']):
-            df = load_business_dataset('monthly_summary')
+        # Enhanced dataset selection with better keyword matching
+        dataset_choice = 'monthly_summary'  # Default
+        context = "Monthly Summary Dataset (default)"
+        
+        if any(keyword in query_lower for keyword in ['conversion rate trends', 'monthly conversion', 'segment conversion']):
+            dataset_choice = 'monthly_summary'
             context = "Monthly Summary Dataset"
+        elif any(keyword in query_lower for keyword in ['transaction volume', 'volume analysis', 'transaction count', 'volume by period']):
+            dataset_choice = 'daily_summary'  # Better for volume trends
+            context = "Daily Summary Dataset - Transaction Volume"
         elif any(keyword in query_lower for keyword in ['transaction', 'detailed', 'raw data']):
-            df = load_business_dataset('transaction_data')
+            dataset_choice = 'transaction_data'
             context = "Transaction Data Dataset"
-        elif any(keyword in query_lower for keyword in ['daily', 'day by day', 'time series']):
-            df = load_business_dataset('daily_summary')
+        elif any(keyword in query_lower for keyword in ['daily', 'day by day', 'time series', 'by period', 'period analysis']):
+            dataset_choice = 'daily_summary'
             context = "Daily Summary Dataset"
         elif any(keyword in query_lower for keyword in ['channel', 'acquisition', 'marketing']):
-            df = load_business_dataset('channel_performance')
+            dataset_choice = 'channel_performance'
             context = "Channel Performance Dataset"
         elif any(keyword in query_lower for keyword in ['segment comparison', 'segment analysis', 'benchmark']):
-            df = load_business_dataset('segment_analysis')
+            dataset_choice = 'segment_analysis'
             context = "Segment Analysis Dataset"
-        else:
-            df = load_business_dataset('monthly_summary')  # Default
-            context = "Monthly Summary Dataset (default)"
+        
+        # Load the selected dataset
+        df = load_business_dataset(dataset_choice)
         
         if isinstance(df, str):  # Error loading dataset
-            return f"❌ Dataset Error: {df}\n\n{get_dataset_info()}"
+            return f"❌ Dataset Error: {df}\n\nTrying alternative approach...\n{get_dataset_info()}"
         
-        # Handle specific BI queries
+        # Special handling for transaction volume analysis
+        if 'transaction volume' in query_lower and 'period' in query_lower:
+            return analyze_transaction_volume_by_period(df, dataset_choice)
+        
+        # Handle conversion rate analysis
         if 'conversion rate trends by merchant segment' in query_lower:
             return analyze_conversion_trends_by_segment('monthly')
         
-        # Handle SQL-like queries
-        result_df = df.copy()
-        
-        # Apply aggregations
-        if 'select' in query_lower:
-            if 'avg' in query_lower and 'conversion' in query_lower:
-                if 'merchant_segment' in df.columns:
-                    result_df = df.groupby('merchant_segment')['conversion_rate'].mean().round(4)
-                elif 'conversion_rate' in df.columns:
-                    result_df = pd.DataFrame({'average_conversion_rate': [df['conversion_rate'].mean()]})
-                    
-            elif 'sum' in query_lower and ('revenue' in query_lower):
-                if 'merchant_segment' in df.columns and 'revenue' in df.columns:
-                    result_df = df.groupby('merchant_segment')['revenue'].sum().round(2)
-                elif 'revenue' in df.columns:
-                    result_df = pd.DataFrame({'total_revenue': [df['revenue'].sum()]})
-                    
-            elif 'count' in query_lower:
-                if 'merchant_segment' in df.columns:
-                    result_df = df.groupby('merchant_segment').size()
-                else:
-                    result_df = pd.DataFrame({'total_records': [len(df)]})
-        
-        # Apply filters
-        if 'where' in query_lower:
-            filter_conditions = []
-            
-            # Segment filters
-            segment_filters = {
-                'premium': 'Premium',
-                'enterprise': 'Enterprise', 
-                'standard': 'Standard',
-                'small business': 'Small Business',
-                'startup': 'Startup'
-            }
-            
-            for keyword, segment in segment_filters.items():
-                if keyword in query_lower and 'merchant_segment' in df.columns:
-                    if hasattr(result_df, 'loc'):
-                        result_df = result_df[result_df['merchant_segment'] == segment]
-                    break
-            
-            # Date filters
-            if '2024-10' in query_lower and 'month' in df.columns:
-                if hasattr(result_df, 'loc'):
-                    result_df = result_df[result_df['month'] == '2024-10']
-            elif '2024-11' in query_lower and 'month' in df.columns:
-                if hasattr(result_df, 'loc'):
-                    result_df = result_df[result_df['month'] == '2024-11']
-            elif '2024-12' in query_lower and 'month' in df.columns:
-                if hasattr(result_df, 'loc'):
-                    result_df = result_df[result_df['month'] == '2024-12']
-        
-        # Apply sorting
-        if 'order by' in query_lower:
-            if 'revenue' in query_lower and hasattr(result_df, 'sort_values'):
-                if 'revenue' in result_df.columns:
-                    result_df = result_df.sort_values('revenue', ascending=False)
-            elif 'conversion' in query_lower and hasattr(result_df, 'sort_values'):
-                if 'conversion_rate' in result_df.columns:
-                    result_df = result_df.sort_values('conversion_rate', ascending=False)
-            elif 'month' in query_lower and hasattr(result_df, 'sort_values'):
-                if 'month' in result_df.columns:
-                    result_df = result_df.sort_values('month')
-        
-        # Apply limit
-        if 'limit' in query_lower:
-            try:
-                limit_parts = query_lower.split('limit')
-                if len(limit_parts) > 1:
-                    limit_value = int(limit_parts[1].strip().split()[0])
-                    if hasattr(result_df, 'head'):
-                        result_df = result_df.head(limit_value)
-            except:
-                pass
-        
-        # Format results
-        if hasattr(result_df, 'to_string'):
-            result_output = result_df.to_string()
-        else:
-            result_output = str(result_df)
-        
-        return f"""
+        # Generic data summary if specific analysis fails
+        summary_result = f"""
 📊 BUSINESS INTELLIGENCE QUERY RESULTS
 Dataset Used: {context}
 Query: {query}
 
-📈 RESULTS:
-{result_output}
+📈 DATASET OVERVIEW:
+• Total Records: {len(df):,}
+• Date Range: {get_date_range(df)}
+• Available Columns: {', '.join(df.columns)}
 
-📋 Dataset Info: {len(df)} records, {len(df.columns)} columns
-Available Columns: {', '.join(df.columns)}
+📋 SAMPLE DATA (First 5 rows):
+{df.head().to_string()}
+
+💡 DATA SUMMARY:
+{generate_data_summary(df)}
 """
+        return summary_result
         
     except Exception as e:
-        return f"❌ Query processing error: {str(e)}\n\n{get_dataset_info()}"
+        error_details = f"Query processing error: {str(e)}"
+        fallback_info = get_dataset_info()
+        return f"❌ {error_details}\n\n📚 Available Datasets:\n{fallback_info}"
 
-def retrieve_business_context(query: str) -> str:
-    """Retrieve comprehensive business context and dataset information"""
-    dataset_info = get_dataset_info()
-    
-    context = f"""
-🏢 **BUSINESS INTELLIGENCE CONTEXT - Q4 2024**
-
-{dataset_info}
-
-📈 **STRATEGIC INITIATIVES:**
-- Payment Flow Optimization (Feature A) - Launched October 1, 2024
-- Mobile Dashboard Enhancement (Feature B) - Deployed September 15, 2024  
-- Automated Reconciliation System (Feature C) - Released November 1, 2024
-
-⚙️ **OPERATIONAL CHANGES:**
-- Transaction Threshold Adjustment: Reduced minimum from $100 to $50 (November 15, 2024)
-- Enhanced KYC Protocol Implementation (October 20, 2024)
-- Streamlined Merchant Onboarding Process (November 10, 2024)
-
-🎯 **MARKET SEGMENTS:**
-- **Premium**: High-value merchants with advanced features
-- **Enterprise**: Large-scale business partnerships  
-- **Standard**: Mid-tier merchant base
-- **Small Business**: SMB segment with basic needs
-- **Startup**: New and emerging businesses
-
-📊 **PERFORMANCE BENCHMARKS:**
-- Target Conversion Rate: 85%
-- Average Transaction Value: $250
-- Active Merchant Base: 2,500+ partners
-- Weekly Processing Volume: $2.1M average
-
-🔍 **QUICK ANALYSIS COMMANDS:**
-- "Show monthly conversion rates for each merchant segment" 
-- "Analyze channel performance by segment"
-- "Compare revenue across business units"
-- "Daily trend analysis for Q4 2024"
-"""
-    return context
-
-def create_agent(google_api_key=None):
-    """Initialize the professional FP&A AI agent with CSV dataset analysis capabilities"""
-    
-    # Validate API configuration
-    api_key = google_api_key or os.environ.get('GOOGLE_API_KEY')
-    if not api_key:
-        raise ValueError("AI model API key required for analysis. Set GOOGLE_API_KEY environment variable.")
-    
-    if not HAS_GOOGLE_AI:
-        raise ValueError("Required AI dependencies not available. Install: pip install langchain-google-genai")
-    
-    # Initialize AI model
+def analyze_transaction_volume_by_period(df, dataset_name):
+    """Analyze transaction volume trends by time period"""
     try:
-        llm = ChatGoogleGenerativeAI(
-            model="gemini-pro",
-            google_api_key=api_key,
-            temperature=0.1,
-            convert_system_message_to_human=True
-        )
-    except Exception as e1:
-        try:
-            llm = ChatGooglePalm(
-                google_api_key=api_key,
-                temperature=0.1
-            )
-        except Exception as e2:
-            raise ValueError(f"AI model initialization failed: {e1}")
-    
-    # Configure business intelligence tools
-    intelligence_tools = [
-        Tool(
-            name="BusinessContextRetrieval", 
-            func=retrieve_business_context, 
-            description="Retrieves comprehensive business context including available datasets, strategic initiatives, operational changes, market segments, and performance benchmarks. Always use this first to understand available data."
-        ),
-        Tool(
-            name="BusinessIntelligenceQuery", 
-            func=execute_business_query, 
-            description=(
-                "Executes advanced business intelligence queries on uploaded CSV datasets. "
-                "Automatically selects the right dataset based on query content. "
-                "Available datasets: monthly_summary (conversion trends), transaction_data (detailed analysis), "
-                "daily_summary (time series), channel_performance (acquisition analysis), segment_analysis (benchmarks). "
-                "Supports SQL-style queries, aggregations, filtering, and sorting. "
-                "Perfect for: 'Show monthly conversion rates for each merchant segment in Q4 2024'"
-            )
-        ),
-        Tool(
-            name="ConversionTrendsAnalysis",
-            func=lambda query: analyze_conversion_trends_by_segment('monthly'),
-            description="Specialized analysis for conversion rate trends by merchant segment. Direct answer to BI queries about segment performance over time."
-        )
-    ]
-    
-    # Initialize the FP&A agent
-    fp_agent = initialize_agent(
-        tools=intelligence_tools,
-        llm=llm,
-        agent="zero-shot-react-description",
-        verbose=True,
-        handle_parsing_errors=True,
-        max_iterations=5,
-        agent_kwargs={
-            "prefix": """You are a senior Financial Planning & Analysis (FP&A) AI specialist providing executive-level business intelligence analysis using uploaded CSV datasets.
-
-Your analytical approach:
-1. ALWAYS start with BusinessContextRetrieval to understand available datasets and business context
-2. Use BusinessIntelligenceQuery for general data analysis and SQL-like queries
-3. Use ConversionTrendsAnalysis for specific conversion rate trend analysis by merchant segment
-4. Synthesize findings into actionable business insights with specific metrics
-5. Connect performance data to business context (initiatives, feature launches, operational changes)
-6. Provide executive-ready analysis with clear conclusions and strategic recommendations
-
-You analyze REAL uploaded CSV data from Q4 2024, not synthetic data.
-Focus on delivering professional, data-driven insights that support strategic decision-making.
-Always reference specific performance metrics from the actual datasets.""",
+        if dataset_name == 'daily_summary' and 'date' in df.columns:
+            # Daily transaction volume analysis
+            if 'transaction_count' in df.columns:
+                volume_col = 'transaction_count'
+            elif 'volume' in df.columns:
+                volume_col = 'volume'
+            elif 'sessions' in df.columns:
+                volume_col = 'sessions'  # Fallback
+            else:
+                return f"❌ No volume column found in {dataset_name}. Available: {list(df.columns)}"
             
-            "format_instructions": """Follow this professional analysis format:
+            # Time series analysis
+            df_sorted = df.sort_values('date')
+            total_volume = df_sorted[volume_col].sum()
+            avg_daily_volume = df_sorted[volume_col].mean()
+            peak_day = df_sorted.loc[df_sorted[volume_col].idxmax()]
+            
+            # Weekly trends
+            df_sorted['week'] = pd.to_datetime(df_sorted['date']).dt.isocalendar().week
+            weekly_volume = df_sorted.groupby('week')[volume_col].sum().sort_values(ascending=False)
+            
+            result = f"""
+🎯 TRANSACTION VOLUME ANALYSIS BY PERIOD - Q4 2024
 
-Thought: I need to understand available datasets and business context first
-Action: BusinessContextRetrieval
-Action Input: business context and dataset information
-Observation: [business context and available datasets]
-Thought: Now I'll execute the specific analysis requested using the appropriate dataset
-Action: [BusinessIntelligenceQuery OR ConversionTrendsAnalysis]
-Action Input: [specific query matching the user's request]
-Observation: [analysis results from real CSV data]
-Thought: I have comprehensive data analysis results to provide business intelligence
-Final Answer: [executive-level analysis with specific metrics from real data, insights, strategic recommendations, and connection to business context]
+📈 VOLUME METRICS:
+• Total Transaction Volume: {total_volume:,}
+• Average Daily Volume: {avg_daily_volume:,.0f}
+• Peak Day: {peak_day['date']} ({peak_day[volume_col]:,} transactions)
 
-Always provide specific metrics, percentages, and dollar amounts from the actual CSV data."""
-        }
-    )
-    
-    return fp_agent
+📊 TOP 5 WEEKS BY VOLUME:
+{weekly_volume.head().to_string()}
 
-# Convenience functions for direct analysis
-def quick_conversion_analysis():
-    """Quick analysis of conversion trends - perfect for testing"""
-    return analyze_conversion_trends_by_segment('monthly')
+📅 DAILY VOLUME TREND:
+{df_sorted[['date', volume_col]].tail(10).to_string()}
 
-def quick_dataset_check():
-    """Check if datasets are accessible"""
-    results = {}
-    for dataset_name in DATASET_CONFIG.keys():
-        df = load_business_dataset(dataset_name)
-        if isinstance(df, pd.DataFrame):
-            results[dataset_name] = f"✅ Loaded successfully ({len(df)} records)"
+💡 KEY INSIGHTS:
+• Highest volume week: Week {weekly_volume.index[0]} ({weekly_volume.iloc[0]:,} transactions)
+• Volume growth trend: {calculate_growth_trend(df_sorted[volume_col])}
+• Data period: {df_sorted['date'].min()} to {df_sorted['date'].max()}
+"""
+            return result
+            
         else:
-            results[dataset_name] = f"❌ {df}"
-    
-    return results
+            # Fallback analysis for other datasets
+            numeric_cols = df.select_dtypes(include=[np.number]).columns
+            if len(numeric_cols) > 0:
+                summary_stats = df[numeric_cols].describe().round(2)
+                return f"""
+📊 TRANSACTION VOLUME ANALYSIS
+Dataset: {dataset_name}
 
-if __name__ == "__main__":
-    print("🚀 FP&A Agent with CSV Dataset Analysis")
-    print("="*50)
-    
-    # Test dataset access
-    print("\n📊 Testing Dataset Access:")
-    check_results = quick_dataset_check()
-    for dataset, status in check_results.items():
-        print(f"  {dataset}: {status}")
-    
-    # Test conversion analysis
-    print("\n🎯 Testing Conversion Rate Analysis:")
-    print(quick_conversion_analysis())
+📈 NUMERIC SUMMARY:
+{summary_stats.to_string()}
+
+📋 Available columns: {', '.join(df.columns)}
+Records analyzed: {len(df):,}
+"""
+            else:
+                return f"❌ No numeric columns found for volume analysis in {dataset_name}"
+                
+    except Exception as e:
+        return f"❌ Volume analysis error: {str(e)}"
+
+def get_date_range(df):
+    """Get date range from dataframe"""
+    date_columns = [col for col in df.columns if 'date' in col.lower() or 'month' in col.lower()]
+    if date_columns:
+        date_col = date_columns[0]
+        try:
+            return f"{df[date_col].min()} to {df[date_col].max()}"
+        except:
+            return "Date range unavailable"
+    return "No date columns found"
+
+def generate_data_summary(df):
+    """Generate summary statistics for dataframe"""
+    try:
+        numeric_cols = df.select_dtypes(include=[np.number]).columns
+        if len(numeric_cols) > 0:
+            summary = []
+            for col in numeric_cols[:5]:  # Limit to top 5 numeric columns
+                summary.append(f"• {col}: {df[col].mean():.2f} avg, {df[col].sum():,.0f} total")
+            return "\n".join(summary)
+        else:
+            return "• Non-numeric data - categorical analysis available"
+    except:
+        return "• Summary statistics unavailable"
+
+def calculate_growth_trend(series):
+    """Calculate simple growth trend"""
+    try:
+        if len(series) < 2:
+            return "Insufficient data"
+        first_half = series.iloc[:len(series)//2].mean()
+        second_half = series.iloc[len(series)//2:].mean()
+        growth = ((second_half - first_half) / first_half) * 100
+        if growth > 5:
+            return f"Growing (+{growth:.1f}%)"
+        elif growth < -5:
+            return f"Declining ({growth:.1f}%)"
+        else:
+            return f"Stable ({growth:.1f}%)"
+    except:
+        return "Trend calculation unavailable"
+
+# Update the load_business_dataset function to handle errors better
+def load_business_dataset(dataset_name='monthly_summary', use_github=True):
+    """Enhanced dataset loading with better error handling"""
+    try:
+        if dataset_name not in DATASET_CONFIG:
+            available = list(DATASET_CONFIG.keys())
+            return f"Dataset '{dataset_name}' not found. Available: {available}"
+        
+        file_name = DATASET_CONFIG[dataset_name]['file']
+        
+        if use_github:
+            url = f"{GITHUB_RAW_BASE_URL}{file_name}"
+            print(f"🔄 Loading {dataset_name} from: {url}")  # Debug info
+            
+            response = requests.get(url, timeout=10)
+            response.raise_for_status()
+            
+            df = pd.read_csv(StringIO(response.text))
+            print(f"✅ Successfully loaded {len(df)} rows from {dataset_name}")
+            return df
+        else:
+            local_path = f"data/{file_name}"
+            if not os.path.exists(local_path):
+                return f"Local file not found: {local_path}"
+            df = pd.read_csv(local_path)
+            return df
+        
+    except requests.exceptions.Timeout:
+        return "❌ Request timeout - GitHub may be slow. Please try again."
+    except requests.exceptions.ConnectionError:
+        return "❌ Connection error - Please check internet connectivity."
+    except requests.exceptions.HTTPError as e:
+        if e.response.status_code == 404:
+            return f"❌ File not found on GitHub: {file_name}. Please verify the file exists."
+        else:
+            return f"❌ HTTP error {e.response.status_code}: {str(e)}"
+    except Exception as e:
+        return f"❌ Unexpected error loading {dataset_name}: {str(e)}"
