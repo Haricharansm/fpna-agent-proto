@@ -1,4 +1,4 @@
-# app.py — FP&A BI app (deterministic DuckDB/Pandas + optional Mistral summary)
+# app.py — FP&A BI app (DuckDB/Pandas + optional Mistral narrative)
 import os
 import sys
 from io import StringIO
@@ -14,10 +14,13 @@ if current_dir not in sys.path:
 
 os.environ.setdefault("DATA_DIR", os.path.join(current_dir, "data"))
 
-# Read optional HF secrets and expose as env vars for fpna_agent to use
-for key in ("HF_MODEL", "HF_TOKEN"):
-    if key in st.secrets:
-        os.environ[key] = st.secrets[key]
+# Load optional Mistral secrets into env for fpna.py
+for key in ("MISTRAL_API_KEY", "MISTRAL_MODEL"):
+    try:
+        if key in st.secrets and st.secrets[key]:
+            os.environ[key] = str(st.secrets[key])
+    except Exception:
+        pass
 
 # -------------------------------------------------------------------
 # Prefer new core (fpna.run_bi); fallback to fpna_agent Router
@@ -26,7 +29,7 @@ CORE_OK = False
 err_msg = ""
 
 try:
-    from fpna import run_bi  # preferred new API
+    from fpna import run_bi  # preferred new API (supports embellish + mistral)
     HAVE_RUN_BI = True
     CORE_OK = True
 except Exception as e1:
@@ -57,7 +60,7 @@ st.markdown("---")
 
 if not CORE_OK:
     st.error(f"❌ Cannot import FP&A core: {err_msg}")
-    st.info("📁 Ensure `fpna.py` or `fpna_agent.py` is next to `app.py` and dependencies are installed.")
+    st.info("📁 Ensure `fpna.py` or `fpna_agent.py` sits next to `app.py` and dependencies are installed.")
     st.stop()
 
 # -------------------------------------------------------------------
@@ -65,11 +68,19 @@ if not CORE_OK:
 with st.sidebar:
     st.header("🔧 Configuration")
 
-    hf_enabled = bool(os.getenv("HF_MODEL") or os.getenv("HF_TOKEN"))
-    st.caption(
-        "LLM summarizer: " +
-        ("✅ Hugging Face configured (Mistral)" if hf_enabled else "⚠️ Not configured (optional)")
+    mistral_api_key = st.text_input(
+        "Mistral API key (optional for 🪄 narrative)",
+        value=os.getenv("MISTRAL_API_KEY", ""),
+        type="password",
+        help="If provided, the app will add an executive LLM narrative using Mistral."
     )
+    use_llm_narrative = st.checkbox("🪄 Add LLM narrative (Mistral)", value=bool(mistral_api_key))
+
+    if use_llm_narrative:
+        if mistral_api_key:
+            st.success("Mistral narrative enabled")
+        else:
+            st.warning("Provide a Mistral API key to enable narrative")
 
     st.subheader("Data")
     st.caption(f"Reading CSVs from: `{os.environ['DATA_DIR']}`")
@@ -79,9 +90,9 @@ with st.sidebar:
     st.subheader("Business Context")
     st.markdown("""
 **Period**: recent weeks/months (as data provides)  
-**Segments**: Retail / Wholesale / etc.  
+**Segments**: Retail / Wholesale / New / etc.  
 **Metrics**: Revenue, Conversion, Volume  
-**Engine**: Deterministic DuckDB/Pandas; optional Mistral summary (Hugging Face)
+**Engine**: Deterministic DuckDB/Pandas; optional Mistral narrative
 """)
 
 # -------------------------------------------------------------------
@@ -123,42 +134,70 @@ with st.expander("💼 Sample Business Questions"):
 def _looks_like_csv(text: str) -> bool:
     if not text or not text.strip():
         return False
-    first = text.strip().splitlines()[0]
-    return "," in first and len(first.split(",")) >= 2
+    head = text.strip().splitlines()[0]
+    return ("," in head) and (len(head.split(",")) >= 2)
+
+def _line_chart_if_time(df: pd.DataFrame):
+    for time_col in ["period", "week_start", "date", "day", "month"]:
+        if time_col in df.columns:
+            try:
+                tmp = df.copy()
+                tmp[time_col] = pd.to_datetime(tmp[time_col], errors="coerce")
+                tmp = tmp.dropna(subset=[time_col])
+                num_cols = tmp.select_dtypes("number").columns.tolist()
+                if num_cols:
+                    st.line_chart(data=tmp.set_index(time_col)[num_cols])
+                return
+            except Exception:
+                return
 
 def _render_result(result: str):
     """
-    Handle three cases:
-      1) "## Executive Summary ...\n---\n<CSV>"
-      2) plain CSV
-      3) markdown/text
+    Supports:
+      - '## Executive Summary ...\\n---\\n<CSV>\\n---\\n### 🪄 LLM Narrative ...'
+      - a plain CSV
+      - markdown/text only
     """
-    if result.strip().startswith("## Executive Summary"):
-        parts = result.split("\n---\n", 1)
-        st.markdown(parts[0])  # show summary
-        if len(parts) > 1 and _looks_like_csv(parts[1]):
-            df = pd.read_csv(StringIO(parts[1]))
-            st.dataframe(df, use_container_width=True)
+    txt = result.strip()
+    parts = txt.split("\n---\n")
+
+    if parts[0].startswith("## ") or parts[0].startswith("# "):
+        # section 1: markdown summary
+        st.markdown(parts[0])
+
+        # remaining sections: CSV tables or markdown (e.g., LLM narrative)
+        for sec in parts[1:]:
+            if _looks_like_csv(sec):
+                df = pd.read_csv(StringIO(sec))
+                st.dataframe(df, use_container_width=True)
+                _line_chart_if_time(df)
+            else:
+                st.markdown(sec)
         return
 
-    if _looks_like_csv(result):
-        df = pd.read_csv(StringIO(result))
+    # Plain CSV case
+    if _looks_like_csv(txt):
+        df = pd.read_csv(StringIO(txt))
         st.dataframe(df, use_container_width=True)
+        _line_chart_if_time(df)
         return
 
-    st.markdown(result)
+    # Fallback: raw markdown/text
+    st.markdown(txt)
 
 # -------------------------------------------------------------------
 # Router
 
 def _run_query(question: str) -> str:
     q = (question or "").strip()
-    if HAVE_RUN_BI:
-        # New core path: fpna.run_bi handles deterministic + optional summary
-        return run_bi(q, api_key=None)
 
-    # Fallback: fpna_agent RouterAgent
-    agent = create_agent()  # no key needed for deterministic routes
+    if HAVE_RUN_BI:
+        # New core path: fpna.run_bi handles deterministic + optional Mistral narrative
+        api_key = mistral_api_key or None
+        return run_bi(q, api_key=api_key, embellish=bool(api_key and use_llm_narrative))
+
+    # Fallback: fpna_agent RouterAgent (no LLM embellishment)
+    agent = create_agent()  # deterministic routes only
     return agent.run(q)
 
 # -------------------------------------------------------------------
@@ -183,7 +222,7 @@ if go:
                     st.markdown(f"""
 **Data Sources**: CSVs in `{os.environ['DATA_DIR']}`  
 **Engine**: DuckDB/Pandas (deterministic)  
-**LLM Summarizer**: Mistral via Hugging Face Inference ({'enabled' if hf_enabled else 'disabled'})  
+**LLM Narrative**: {'Enabled (Mistral)' if (mistral_api_key and use_llm_narrative) else 'Disabled'}  
 **Tip**: You can also run SQL directly (start your query with `SELECT`).
 """)
             except Exception as e:
@@ -200,7 +239,7 @@ with c1:
 with c2:
     st.markdown("**📊 Data Coverage**  \nRevenue metrics  \nConversion analytics  \nPerformance indicators")
 with c3:
-    st.markdown("**🤖 LLM (Optional)**  \nExecutive summaries  \nHugging Face Inference (Mistral)")
+    st.markdown("**🪄 LLM (Optional)**  \nExecutive narrative  \nMistral API")
 
 st.markdown("""
 <style>
