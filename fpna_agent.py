@@ -1,4 +1,4 @@
-# fpna.py — FP&A core with strategic insights (deterministic)
+# fpna.py — FP&A core with strategic insights (deterministic) + optional Mistral narrative
 from __future__ import annotations
 
 import os
@@ -17,13 +17,13 @@ except Exception:
     duckdb = None
     HAVE_DUCKDB = False
 
-# Optional direct Gemini SDK (not required)
+# Optional Mistral SDK (no LangChain)
 try:
-    import google.generativeai as genai  # type: ignore
-    GENAI_OK = True
+    from mistralai import Mistral  # type: ignore
+    MISTRAL_OK = True
 except Exception:
-    genai = None
-    GENAI_OK = False
+    Mistral = None
+    MISTRAL_OK = False
 
 DATA_DIR = os.environ.get("DATA_DIR", "data")
 
@@ -255,6 +255,27 @@ def analyze_conversion_trends() -> str:
     g = g[["month", "merchant_segment", "visits", "leads", "conversion_rate"]].sort_values(["month", "merchant_segment"])
     return summary + "\n---\n" + g.to_csv(index=False)
 
+def revenue_by_business_unit() -> str:
+    """Return CSV: month,business_unit,revenue from monthly_summary if present."""
+    tables = load_tables()
+    if "monthly_summary" not in tables:
+        raise ValueError("monthly_summary.csv not found in ./data")
+    df = tables["monthly_summary"].copy()
+    # Normalize month
+    if "month" in df.columns and df["month"].dtype == "O":
+        try:
+            df["month"] = pd.to_datetime(df["month"], errors="coerce").dt.to_period("M").astype(str)
+        except Exception:
+            df["month"] = df["month"].astype(str)
+    out = (
+        df.groupby(["month", "business_unit"])["revenue"]
+          .sum()
+          .reset_index()
+          .sort_values(["month", "business_unit"])
+    )
+    summary = "## Executive Summary\n- **Analysis:** Revenue by business unit\n- **Rows:** " + _nice_num(len(out))
+    return summary + "\n---\n" + out.to_csv(index=False)
+
 def _before_after_summary(df: pd.DataFrame, sess: str, conv: str, rev: str|None, flag: str) -> tuple[str, pd.DataFrame]:
     """Produce an executive markdown + CSV table for before/after analysis."""
     before = df[df[flag] == 0]
@@ -391,75 +412,126 @@ def growth_trend_forecast(periods_ahead: int = 4) -> str:
         return "Not enough data points to compute a trend."
 
 # ────────────────────────────────────────────────────────────────────────────────
-# Optional LLM fallback (not required)
+# Optional Mistral embellishment / fallback (no LangChain)
+
+def _extract_csv_tail(report: str) -> tuple[str, str]:
+    parts = report.rsplit("\n---\n", 1)
+    if len(parts) == 2:
+        return parts[0], parts[1]
+    return report, ""
+
+def _embellish_with_mistral(raw_report: str, question: str,
+                            api_key: Optional[str],
+                            model: Optional[str] = None) -> str:
+    """Append an LLM-written executive narrative using Mistral."""
+    if not (MISTRAL_OK and api_key):
+        return raw_report
+
+    summary_part, csv_part = _extract_csv_tail(raw_report)
+    data_preview = csv_part[:1800]  # keep prompt compact
+    prompt = f"""
+You are a VP of FP&A. Write a concise executive narrative from the report below.
+Include: 1) 4–6 sentence summary, 2) Key drivers (bullets), 3) Risks/Watchouts (bullets),
+4) 3 concrete recommendations. Avoid reprinting raw tables.
+
+BUSINESS QUESTION:
+{question}
+
+REPORT SUMMARY:
+{summary_part[:1800]}
+
+DATA PREVIEW (CSV HEAD/TOP ROWS):
+{data_preview}
+"""
+
+    try:
+        client = Mistral(api_key=api_key)
+        mdl = model or os.environ.get("MISTRAL_MODEL", "mistral-small-latest")
+        resp = client.chat.complete(
+            model=mdl,
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.2,
+        )
+        text = resp.choices[0].message.content
+        return raw_report + "\n\n---\n### 🪄 LLM Narrative\n" + text
+    except Exception as e:
+        return raw_report + f"\n\n(LLM embellishment failed: {e})"
 
 def _fallback_llm_answer(question: str, api_key: Optional[str]) -> str:
-    if not (GENAI_OK and api_key):
-        return retrieve_business_context("") + "\n\nTip: start your query with SELECT to run SQL directly."
-    try:
-        genai.configure(api_key=api_key)
-        model_name = os.environ.get("GEMINI_MODEL", "gemini-1.5-flash")
-        model = genai.GenerativeModel(model_name)
-        prompt = (
-            "You are a senior FP&A analyst. Using ONLY the context below, "
-            "write a concise executive answer. If data is needed, propose 1–2 SQL queries "
-            "for DuckDB over the listed tables (plain SQL text only).\n\n"
-            f"Question:\n{question}\n\nContext:\n{retrieve_business_context('')}\n\nAnswer:"
-        )
-        resp = model.generate_content(prompt)
-        return getattr(resp, "text", str(resp))
-    except Exception as e:
-        return f"{retrieve_business_context('')}\n\n(LLM fallback failed: {e})"
+    # Fallback = context; optionally narrate with Mistral if key is present
+    base = retrieve_business_context("") + "\n\nTip: start your query with SELECT to run SQL directly."
+    return _embellish_with_mistral(base, question, api_key)
 
 # ────────────────────────────────────────────────────────────────────────────────
 # Router
 
-def run_bi(question: str, api_key: Optional[str] = None) -> str:
+def run_bi(question: str, api_key: Optional[str] = None, embellish: bool = False) -> str:
     q = (question or "").strip()
     ql = q.lower()
 
     # direct SQL
     if ql.startswith("select") or ql.startswith("with "):
-        return execute_sql(q)
+        base = execute_sql(q)
+        return _embellish_with_mistral(base, question, api_key) if embellish else base
 
     # performance analyses
     if "conversion" in ql and "segment" in ql:
-        try: return analyze_conversion_trends()
-        except Exception as e: return f"{retrieve_business_context('')}\n\n(Conversion analysis failed: {e})"
+        try:
+            base = analyze_conversion_trends()
+            return _embellish_with_mistral(base, question, api_key) if embellish else base
+        except Exception as e:
+            return f"{retrieve_business_context('')}\n\n(Conversion analysis failed: {e})"
 
     if ("revenue" in ql) and ("business unit" in ql or "business_unit" in ql or "unit" in ql):
-        try: return revenue_by_business_unit()
-        except Exception as e: return f"{retrieve_business_context('')}\n\n(Revenue analysis failed: {e})"
+        try:
+            base = revenue_by_business_unit()
+            return _embellish_with_mistral(base, question, api_key) if embellish else base
+        except Exception as e:
+            return f"{retrieve_business_context('')}\n\n(Revenue analysis failed: {e})"
 
     # strategic insights
     if ("feature" in ql and ("impact" in ql or "launch" in ql)):
-        try: return feature_launch_impact()
-        except Exception as e: return f"{retrieve_business_context('')}\n\n(Feature impact failed: {e})"
+        try:
+            base = feature_launch_impact()
+            return _embellish_with_mistral(base, question, api_key) if embellish else base
+        except Exception as e:
+            return f"{retrieve_business_context('')}\n\n(Feature impact failed: {e})"
 
     if ("policy" in ql and ("change" in ql or "impact" in ql or "evaluation" in ql)):
-        try: return policy_change_evaluation()
-        except Exception as e: return f"{retrieve_business_context('')}\n\n(Policy analysis failed: {e})"
+        try:
+            base = policy_change_evaluation()
+            return _embellish_with_mistral(base, question, api_key) if embellish else base
+        except Exception as e:
+            return f"{retrieve_business_context('')}\n\n(Policy analysis failed: {e})"
 
     if ("segment" in ql and ("compare" in ql or "optimization" in ql or "opportunity" in ql)):
-        try: return segment_optimization_opportunities()
-        except Exception as e: return f"{retrieve_business_context('')}\n\n(Segment analysis failed: {e})"
+        try:
+            base = segment_optimization_opportunities()
+            return _embellish_with_mistral(base, question, api_key) if embellish else base
+        except Exception as e:
+            return f"{retrieve_business_context('')}\n\n(Segment analysis failed: {e})"
 
     if ("growth" in ql and ("trend" in ql or "forecast" in ql)):
-        try: return growth_trend_forecast()
-        except Exception as e: return f"{retrieve_business_context('')}\n\n(Growth analysis failed: {e})"
+        try:
+            base = growth_trend_forecast()
+            return _embellish_with_mistral(base, question, api_key) if embellish else base
+        except Exception as e:
+            return f"{retrieve_business_context('')}\n\n(Growth analysis failed: {e})"
 
-    # default
-    return _fallback_llm_answer(q, api_key)
+    # default: context (optionally narrated)
+    return _fallback_llm_answer(q, api_key) if embellish else retrieve_business_context("")
 
 # Minimal wrapper for older app usage
 class RouterAgent:
-    def __init__(self, api_key: Optional[str] = None):
+    def __init__(self, api_key: Optional[str] = None, embellish: bool = False):
         self.api_key = api_key
+        self.embellish = embellish
     def run(self, q: str) -> str:
-        return run_bi(q, self.api_key)
+        return run_bi(q, self.api_key, self.embellish)
 
 def create_agent(google_api_key: Optional[str] = None):
-    return RouterAgent(google_api_key)
+    # Backwards-compat shim
+    return RouterAgent(google_api_key, embellish=False)
 
 if __name__ == "__main__":
     print(run_bi("Impact of recent feature launches"))
