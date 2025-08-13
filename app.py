@@ -1,4 +1,4 @@
-# app.py — robust imports + fast-path router
+# app.py — FP&A BI app (deterministic DuckDB/Pandas + optional Mistral summary)
 import os
 import sys
 from io import StringIO
@@ -13,36 +13,29 @@ if current_dir not in sys.path:
     sys.path.append(current_dir)
 
 os.environ.setdefault("DATA_DIR", os.path.join(current_dir, "data"))
-os.environ.setdefault("GEMINI_MODEL", "gemini-1.5-flash")
-os.environ.setdefault("AGENT_MAX_STEPS", "12")
+
+# Read optional HF secrets and expose as env vars for fpna_agent to use
+for key in ("HF_MODEL", "HF_TOKEN"):
+    if key in st.secrets:
+        os.environ[key] = st.secrets[key]
 
 # -------------------------------------------------------------------
-# Try fpna.py first (has run_bi); fallback to fpna_agent.py
+# Prefer new core (fpna.run_bi); fallback to fpna_agent Router
 HAVE_RUN_BI = False
-FPNA_CORE_OK = False
+CORE_OK = False
 err_msg = ""
 
 try:
-    from fpna import run_bi  # preferred
+    from fpna import run_bi  # preferred new API
     HAVE_RUN_BI = True
-    FPNA_CORE_OK = True
+    CORE_OK = True
 except Exception as e1:
-    # Fallback: older module name / API
     try:
-        from fpna_agent import create_agent  # noqa: F401
-        # Optional helpers if available
-        try:
-            from fpna_agent import execute_business_query as _exec_sql  # noqa: F401
-        except Exception:
-            _exec_sql = None
-        try:
-            from fpna_agent import analyze_monthly_conversion_rates as _conv_helper  # noqa: F401
-        except Exception:
-            _conv_helper = None
-        FPNA_CORE_OK = True
-        err_msg = ""
+        # Older module; create_agent returns a Router-like object with .run()
+        from fpna_agent import create_agent
+        CORE_OK = True
     except Exception as e2:
-        FPNA_CORE_OK = False
+        CORE_OK = False
         err_msg = f"{e1}  |  {e2}"
 
 st.set_page_config(
@@ -57,45 +50,38 @@ st.set_page_config(
 st.markdown("""
 <div style='text-align:center;padding:1rem 0;'>
   <h1 style='color:#1e3a8a;margin:0;'>📊 Financial Planning & Analysis</h1>
-  <h2 style='color:#64748b;margin:0;font-weight:400;'>AI-Powered Business Intelligence Agent</h2>
+  <h2 style='color:#64748b;margin:0;font-weight:400;'>Business Intelligence Agent (DuckDB + optional Mistral)</h2>
 </div>
 """, unsafe_allow_html=True)
 st.markdown("---")
 
-if not FPNA_CORE_OK:
+if not CORE_OK:
     st.error(f"❌ Cannot import FP&A core: {err_msg}")
-    st.info("📁 Make sure either `fpna.py` or `fpna_agent.py` is next to `app.py` and dependencies are installed.")
+    st.info("📁 Ensure `fpna.py` or `fpna_agent.py` is next to `app.py` and dependencies are installed.")
     st.stop()
 
 # -------------------------------------------------------------------
 # Sidebar
 with st.sidebar:
     st.header("🔧 Configuration")
-    google_api_key = st.text_input(
-        "AI Model API Key",
-        type="password",
-        placeholder="Enter your API key (only needed for LLM agent)…",
-        help="Gemini 1.5 key for model-backed analysis. Not required for canned/SQL paths."
-    )
-    if google_api_key and len(google_api_key) > 20:
-        st.success("✅ API Key configured")
-    elif google_api_key:
-        st.warning("⚠️ Please check API key format")
-    else:
-        st.info("🔑 API key optional for most demo queries")
 
-    st.divider()
-    st.subheader("Data Configuration")
-    st.caption(f"Using CSVs from: `{os.environ['DATA_DIR']}`")
-    st.info("📊 All CSVs in this folder are auto-registered as DuckDB tables.")
+    hf_enabled = bool(os.getenv("HF_MODEL") or os.getenv("HF_TOKEN"))
+    st.caption(
+        "LLM summarizer: " +
+        ("✅ Hugging Face configured (Mistral)" if hf_enabled else "⚠️ Not configured (optional)")
+    )
+
+    st.subheader("Data")
+    st.caption(f"Reading CSVs from: `{os.environ['DATA_DIR']}`")
+    st.info("📁 All `*.csv` in this folder are auto-registered as DuckDB tables.")
 
     st.divider()
     st.subheader("Business Context")
     st.markdown("""
-**Current Period**: Q4 2024  
-**Segments**: Retail, Wholesale, New Merchants  
+**Period**: recent weeks/months (as data provides)  
+**Segments**: Retail / Wholesale / etc.  
 **Metrics**: Revenue, Conversion, Volume  
-**Analysis Window**: 8 weeks
+**Engine**: Deterministic DuckDB/Pandas; optional Mistral summary (Hugging Face)
 """)
 
 # -------------------------------------------------------------------
@@ -113,8 +99,8 @@ with c2:
     go = st.button("🔍 Analyze", use_container_width=True, type="primary")
 
 with st.expander("💼 Sample Business Questions"):
-    l, r = st.columns(2)
-    with l:
+    left, right = st.columns(2)
+    with left:
         st.markdown("""
 **Performance Analysis:**
 • Conversion rate trends by merchant segment  
@@ -122,7 +108,7 @@ with st.expander("💼 Sample Business Questions"):
 • Transaction volume analysis by period  
 • Customer acquisition metrics by channel
 """)
-    with r:
+    with right:
         st.markdown("""
 **Strategic Insights:**
 • Impact of recent feature launches  
@@ -132,102 +118,89 @@ with st.expander("💼 Sample Business Questions"):
 """)
 
 # -------------------------------------------------------------------
-# Helper: render CSV-ish responses nicely
-def _try_render_tabular(result_str: str) -> bool:
-    try:
-        if ("," not in result_str) or ("\n" not in result_str):
-            return False
-        df = pd.read_csv(StringIO(result_str))
-        if df.empty:
-            return False
-        st.dataframe(df, use_container_width=True)
-        # quick chart if time-like column exists
-        for time_col in ["period", "week_start", "date", "day", "month"]:
-            if time_col in df.columns:
-                try:
-                    df_plot = df.copy()
-                    df_plot[time_col] = pd.to_datetime(df_plot[time_col], errors="coerce")
-                    df_plot = df_plot.dropna(subset=[time_col])
-                    num_cols = df_plot.select_dtypes("number").columns.tolist()
-                    if num_cols:
-                        st.line_chart(data=df_plot.set_index(time_col)[num_cols])
-                        break
-                except Exception:
-                    pass
-                break
-        return True
-    except Exception:
+# Helpers
+
+def _looks_like_csv(text: str) -> bool:
+    if not text or not text.strip():
         return False
+    first = text.strip().splitlines()[0]
+    return "," in first and len(first.split(",")) >= 2
+
+def _render_result(result: str):
+    """
+    Handle three cases:
+      1) "## Executive Summary ...\n---\n<CSV>"
+      2) plain CSV
+      3) markdown/text
+    """
+    if result.strip().startswith("## Executive Summary"):
+        parts = result.split("\n---\n", 1)
+        st.markdown(parts[0])  # show summary
+        if len(parts) > 1 and _looks_like_csv(parts[1]):
+            df = pd.read_csv(StringIO(parts[1]))
+            st.dataframe(df, use_container_width=True)
+        return
+
+    if _looks_like_csv(result):
+        df = pd.read_csv(StringIO(result))
+        st.dataframe(df, use_container_width=True)
+        return
+
+    st.markdown(result)
 
 # -------------------------------------------------------------------
-# Router (uses fpna.run_bi if available; otherwise emulate)
-def _run_query(question: str, api_key: str | None):
+# Router
+
+def _run_query(question: str) -> str:
     q = (question or "").strip()
-    ql = q.lower()
-
     if HAVE_RUN_BI:
-        # Preferred new API
-        return run_bi(q, api_key or None)
+        # New core path: fpna.run_bi handles deterministic + optional summary
+        return run_bi(q, api_key=None)
 
-    # Fallback behavior using fpna_agent.py
-    # 1) direct SQL path
-    if ql.startswith("select") or ql.startswith("with "):
-        if '_exec_sql' in globals() and _exec_sql:
-            return _exec_sql(q)
-        return "SQL engine not exposed by fpna_agent; please update to latest fpna core."
-
-    # 2) common canned analysis path
-    if ("conversion" in ql and "segment" in ql) and ('_conv_helper' in globals()) and _conv_helper:
-        return _conv_helper()
-
-    # 3) agent path requires API key
-    if not api_key:
-        return "API key required for agent-backed analysis. Enter it in the sidebar."
-    from fpna_agent import create_agent  # local import to avoid confusion
-    agent = create_agent(google_api_key=api_key)
+    # Fallback: fpna_agent RouterAgent
+    agent = create_agent()  # no key needed for deterministic routes
     return agent.run(q)
 
 # -------------------------------------------------------------------
 # Execute
+
 if go:
     if not user_question.strip():
         st.warning("Please enter a business question.")
     else:
-        with st.spinner("Processing business intelligence query…"):
+        with st.spinner("Analyzing…"):
             try:
-                result = _run_query(user_question, google_api_key or None)
+                result = _run_query(user_question)
 
                 st.success("Analysis Complete")
                 st.markdown("---")
                 st.markdown("## 📈 Business Intelligence Report")
 
-                # Render CSV-ish tables if possible; otherwise show as markdown/text
-                if not _try_render_tabular(result):
-                    st.markdown(result)
+                _render_result(result)
 
                 st.markdown("---")
                 with st.expander("📊 Analysis Details"):
                     st.markdown(f"""
 **Data Sources**: CSVs in `{os.environ['DATA_DIR']}`  
-**Method**: DuckDB/Pandas (deterministic) and Gemini 1.5 (if needed)  
-**Agent Limits**: Steps={os.getenv('AGENT_MAX_STEPS','12')}, Model={os.getenv('GEMINI_MODEL','gemini-1.5-flash')}
+**Engine**: DuckDB/Pandas (deterministic)  
+**LLM Summarizer**: Mistral via Hugging Face Inference ({'enabled' if hf_enabled else 'disabled'})  
+**Tip**: You can also run SQL directly (start your query with `SELECT`).
 """)
             except Exception as e:
                 st.error("Analysis could not be completed.")
                 with st.expander("🔧 Technical Details", expanded=False):
                     st.code(str(e))
-                    st.write("**Error Type:**", type(e).__name__)
 
 # -------------------------------------------------------------------
 # Footer + light styling
 st.markdown("---")
 c1, c2, c3 = st.columns(3)
 with c1:
-    st.markdown("**🎯 Capabilities**  \nReal-time analysis  \nMulti-segment insights  \nTrend identification")
+    st.markdown("**🎯 Capabilities**  \nDeterministic analysis  \nMulti-segment insights  \nTrend identification")
 with c2:
     st.markdown("**📊 Data Coverage**  \nRevenue metrics  \nConversion analytics  \nPerformance indicators")
 with c3:
-    st.markdown("**🚀 AI Features**  \nNatural language queries  \nAutomated insights  \nExecutive summaries")
+    st.markdown("**🤖 LLM (Optional)**  \nExecutive summaries  \nHugging Face Inference (Mistral)")
 
 st.markdown("""
 <style>
